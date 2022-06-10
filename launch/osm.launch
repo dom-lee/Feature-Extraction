@@ -4,7 +4,7 @@
     <param name="velodyne_topic" value="/velodyne_points"/>
     
     <!-- ==================== Publishing Parameters ======================= -->
-    <param name="publishing_rate" value="1" /> <!-- Hz -->
+    <param name="publishing_rate" value="10" /> <!-- Hz -->
   </node>
 
   <node name="rviz" pkg="rviz" type="rviz" args="-d $(find feature_detection)/rviz/osm.rviz" required="false"/>

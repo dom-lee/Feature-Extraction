@@ -10,7 +10,7 @@
 
 #include "driver/driver.h"
 
-int DEBUG_LEVEL = 1;
+int DEBUG_LEVEL = 3;
 
 int main(int argc, char** argv)
 {

@@ -17,6 +17,10 @@
 // ROS
 #include <ros/ros.h>
 
+// Dynamic Configuration
+#include <dynamic_reconfigure/server.h>
+#include <feature_detection/feature_detectionConfig.h>
+
 // PCL
 #include <pcl/point_cloud.h> // PointCloud
 #include <pcl/point_types.h> // PointXYZ
@@ -25,10 +29,11 @@
 // Messgaes
 #include <sensor_msgs/PointCloud2.h>
 #include <sensor_msgs/point_cloud2_iterator.h> // PointCloud2ConstIterator
+#include <geometry_msgs/PointStamped.h>
 
 // Main Algorithm
 #include "feature_detection/feature_detector.h"
-
+#include "setting/feature_detector_setting_t.h"
 // Utils
 #include "utils/debugger.h"
 #include "utils/ros_utils.h"
@@ -50,17 +55,22 @@ private:
 
     // Subscriber
     ros::Subscriber point_cloud_sub_;
+    ros::Subscriber clicked_point_sub_;
 
     // Publisher
     ros::Publisher landmark_pub_;
     ros::Publisher ground_pub_;
+    ros::Publisher a_pub_;
+    ros::Publisher b_pub_;
 
     // Paramters
     std::string velodyne_topic_;
     double publishing_rate_;
+    feature_detector_setting_t feature_detector_setting_;
 
     // Point Clouds
-    std::array<pcl::PointCloud<pcl::PointXYZ>, VELODYNE_RING_NUMBER> rings_; 
+    pcl::PointCloud<pcl::PointXYZI> raw_cloud_;
+    std::array<pcl::PointCloud<pcl::PointXYZI>, VELODYNE_RING_NUMBER> rings_; 
 
     void getPointCloud_(const sensor_msgs::PointCloud2ConstPtr& cloud_msg);
 
@@ -70,5 +80,10 @@ private:
     bool getParameters_();
 
     void waitForData_();
+
+    void reconfigParams_(feature_detection::feature_detectionConfig& config,
+            uint32_t level);
+
+    void getClickedPointCallBack_(const geometry_msgs::PointStamped::ConstPtr& msg);
 };
 #endif /* DRIBER_H */
