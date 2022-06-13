@@ -7,7 +7,7 @@ typedef struct feature_detector_setting
     int    RING_TO_FIT_BASE;
     double FIT_PLANE_THRESHOLD;
     int    LOCAL_WINDOW_SIZE;
-    double NOISE_THRESHOLD;
+    double ALIGNEDNESS_THRESHOLD;
     double ANGLE_BUFFER;
     double DIST_DIFF_THRESHOLD;
     double ANGLE_DIFF_THRESHOLD;
@@ -17,6 +17,5 @@ typedef struct feature_detector_setting
     double ANGULAR_RESOLUTION;
     double ANGLE_CURB_THRESHOLD;
     double DISCONTINUITY;
-    int    INTENSITY_THRESHOLD;
 } feature_detector_setting_t;
 #endif /* FEATURE_DETECTOR_SETTING_H */

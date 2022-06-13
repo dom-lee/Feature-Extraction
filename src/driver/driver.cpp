@@ -158,7 +158,7 @@ void Driver::reconfigParams_(feature_detection::feature_detectionConfig& config,
     detector_setting_.RING_TO_FIT_BASE      = config.ring_to_fit_base;
     detector_setting_.FIT_PLANE_THRESHOLD   = config.fit_plane_threshold;
     detector_setting_.LOCAL_WINDOW_SIZE     = config.local_window_size;
-    detector_setting_.NOISE_THRESHOLD       = config.noise_threshold;
+    detector_setting_.ALIGNEDNESS_THRESHOLD = config.alignedness_threshold;
     detector_setting_.ANGLE_BUFFER          = config.angle_buffer;
     detector_setting_.DIST_DIFF_THRESHOLD   = config.dist_diff_threshold;
     detector_setting_.ANGLE_DIFF_THRESHOLD  = config.angle_diff_threshold;
@@ -167,7 +167,6 @@ void Driver::reconfigParams_(feature_detection::feature_detectionConfig& config,
     detector_setting_.ANGULAR_RESOLUTION    = config.angular_resolution;
     detector_setting_.ANGLE_CURB_THRESHOLD  = config.angle_curb_threshold;
     detector_setting_.DISCONTINUITY         = config.discontinuity;
-    detector_setting_.INTENSITY_THRESHOLD   = config.intensity_threshold;
 }
 
 

@@ -69,30 +69,27 @@ void FeatureDetector::setInputCloud(feature_detector_setting_t setting,
             }
         );
         
-        // Cacluate Difference of distance from origin
-        std::vector<double> diff(ring_size, 0.0);
-        double prev_dist = pcl::euclideanDistance(rings[i].back(), origin);
+        // Select Candidates for fitting plane by checking alignedness
         for (int j = 0; j < ring_size; ++j)
         {
-            double curr_dist = pcl::euclideanDistance(rings[i][j], origin);
-            diff[j] = std::abs(curr_dist - prev_dist) / curr_dist;
-            
-            prev_dist = curr_dist;
-        }
-        
-        // Select Candidates for fitting plane by checking noise
-        for (int j = 0; j < ring_size; ++j)
-        {
-            // Calculate noise
-            double sum_of_diff = 0.0;
+            double alignedness_coeff = 0.0;
             for (int w = -setting_.LOCAL_WINDOW_SIZE;
-                    w <= setting_.LOCAL_WINDOW_SIZE; ++w)
+                        w <= setting_.LOCAL_WINDOW_SIZE; ++w)
             {
-                sum_of_diff += diff[(j + w + ring_size) % ring_size];
+                pcl::PointXYZI& p_curr =
+                        rings[i][(j + w + ring_size) % ring_size];
+                pcl::PointXYZI& p_prev =
+                        rings[i][(j + w - 1 + ring_size) % ring_size];
+                pcl::PointXYZI& p_next =
+                        rings[i][(j + w + 1 + ring_size) % ring_size];
+                
+                alignedness_coeff += pcl::euclideanDistance(p_prev, p_next) /
+                        (pcl::euclideanDistance(p_prev, p_curr) + 
+                         pcl::euclideanDistance(p_curr, p_next));
             }
-            
-            // Filtered Cloud
-            if (sum_of_diff < setting_.NOISE_THRESHOLD)
+            alignedness_coeff /= (2 * setting_.LOCAL_WINDOW_SIZE + 1);
+
+            if (alignedness_coeff > setting_.ALIGNEDNESS_THRESHOLD)
             {
                 base_candidate.push_back(rings[i][j]);
             }
@@ -153,24 +150,11 @@ void FeatureDetector::setInputCloud(feature_detector_setting_t setting,
     std::array<double, azimuth_dividing_number> curr_ring_distances;
     prev_ring_distances.fill(0.0);
     curr_ring_distances.fill(0.0);
+
     // Filtering out for multi-region planar model
     for (int i = 0; i < setting_.RING_TO_ANALYZE; ++i)
     {
-        //// Sort Point Cloud by Couter Clock-wisely
-        //std::sort(rings[i].begin(), rings[i].end(),
-            //[](const pcl::PointXYZI& lhs, const pcl::PointXYZI& rhs)
-            //{
-                //return std::atan2(lhs.y, lhs.x) < std::atan2(rhs.y, rhs.x);
-            //}
-        //);
-        
-        //// Cacluate Distance from origin(0,0,0) 
         int ring_size = rings[i].size();
-        //std::vector<double> dist_origin(ring_size, 0.0);
-        //for (int j = 0; j < ring_size; ++j)
-        //{
-            //dist_origin[j] = pcl::euclideanDistance(rings[i][j], origin);
-        //}
         
         // Elevation angle of ring
         double elevation_angle = elevation_angles_[i];
@@ -184,10 +168,10 @@ void FeatureDetector::setInputCloud(feature_detector_setting_t setting,
 
         for (int j = 0; j < ring_size; ++j)
         {
-            pcl::PointXYZI& p = rings[i][j];
+            pcl::PointXYZI& point = rings[i][j];
 
-            double distance = pcl::euclideanDistance(p, origin);
-            double azimuth = std::atan2(p.y, p.x);
+            double distance = pcl::euclideanDistance(point, origin);
+            double azimuth = std::atan2(point.y, point.x);
             double alpha = std::asin(
                     -(a * std::cos(azimuth) + b * std::sin(azimuth)) / c);
             double dist_base_to_origin = std::abs(d / c) * std::cos(alpha);
@@ -199,18 +183,13 @@ void FeatureDetector::setInputCloud(feature_detector_setting_t setting,
                 continue;
             }
 
-            // Filter Obstacles with estimated distance
-            double distance_threshold_estimate = dist_base_to_origin /
-                    std::sin(theta + setting_.ANGLE_BUFFER);
-
-            if (distance < distance_threshold_estimate)
-            {
-                continue;
-            }
-
             int z = int(azimuth * 180 / M_PI + 180) % 360;
             curr_ring_distances[z] = (curr_ring_distances[z] != 0) ?
                     std::min(curr_ring_distances[z], distance) : distance;
+
+            // Filter Obstacles with estimated distance
+            double distance_threshold_estimate = dist_base_to_origin /
+                    std::sin(theta + setting_.ANGLE_BUFFER);
 
             // Filter Obstacles with previous ring distance
             double theta_prev = alpha - elevation_angle_prev;
@@ -218,12 +197,13 @@ void FeatureDetector::setInputCloud(feature_detector_setting_t setting,
                     std::sin(theta + setting_.ANGLE_BUFFER) *
                     std::sin(theta_prev + setting_.ANGLE_BUFFER);
 
-            if (distance < distance_threshold_iter)
+            if (distance < distance_threshold_estimate ||
+                    distance < distance_threshold_iter)
             {
                 continue;
             }
             
-            // Compute Segment idx
+            // Compute Multi-Region Segment idx
             int q = int(azimuth * 4 / M_PI + 4.5) % 8;
             int k = 0;
             while (k < section_distances_[q].size() && 
@@ -233,58 +213,40 @@ void FeatureDetector::setInputCloud(feature_detector_setting_t setting,
             }
             k--;
             
-            // Convert to PointXYZL from PointXYZ
-            pcl::PointXYZL point;
-            point.x = p.x;
-            point.y = p.y;
-            point.z = p.z;
-            point.label = i;
+            // Convert to PointXYZL from PointXYZ (Label : ring_id)
+            pcl::PointXYZL point_with_label;
+            point_with_label.x = point.x;
+            point_with_label.y = point.y;
+            point_with_label.z = point.z;
+            point_with_label.label = i;
 
-            // Save filtered Points in multi-section
-            multi_region_[q][k].push_back(point); 
-            filtered_region_[q][k].push_back(point);
+            // Save obstacle-filtered Points in multi-section
+            multi_region_[q][k].push_back(point_with_label); 
 
-            //TODO DELETE /////////////////////
-            pcl::PointXYZ pp;
-            pp.x = p.x;
-            pp.y = p.y;
-            pp.z = p.z;
-            if ( (q + k) % 2 == 0)
+            // Filter Grass for ground planar model
+            double alignedness_coeff = 0.0;
+            for (int w = -setting_.LOCAL_WINDOW_SIZE;
+                        w <= setting_.LOCAL_WINDOW_SIZE; ++w)
             {
-                a_test_.push_back(pp);
+                pcl::PointXYZI& p_curr =
+                        rings[i][(j + w + ring_size) % ring_size];
+                pcl::PointXYZI& p_prev =
+                        rings[i][(j + w - 1 + ring_size) % ring_size];
+                pcl::PointXYZI& p_next =
+                        rings[i][(j + w + 1 + ring_size) % ring_size];
+                
+                alignedness_coeff += pcl::euclideanDistance(p_prev, p_next) /
+                        (pcl::euclideanDistance(p_prev, p_curr) + 
+                         pcl::euclideanDistance(p_curr, p_next));
             }
-            else
+            alignedness_coeff /= (2 * setting_.LOCAL_WINDOW_SIZE + 1);
+
+            if (alignedness_coeff > setting_.ALIGNEDNESS_THRESHOLD)
             {
-                b_test_.push_back(pp);
+                filtered_region_[q][k].push_back(point_with_label);
             }
-            ///////////////////////////////////
-
-            //// Calculate Variance
-            //double sum_dist = 0.0;
-            //for (int w = -setting_.LOCAL_WINDOW_SIZE;
-                    //w <= setting_.LOCAL_WINDOW_SIZE; ++w)
-            //{
-                //sum_dist += dist_origin[(j + w + ring_size) % ring_size];
-            //}
-            //double mean_dist = sum_dist / (2 * setting_.LOCAL_WINDOW_SIZE + 1);
-
-            //double var = 0.0;
-            //for (int w = -setting_.LOCAL_WINDOW_SIZE;
-                    //w <= setting_.LOCAL_WINDOW_SIZE; ++w)
-            //{
-                //double dist = dist_origin[(j + w + ring_size) % ring_size];
-                //var += std::pow(dist - mean_dist, 2);
-            //}
-            //var /= (2 * setting_.LOCAL_WINDOW_SIZE + 1);
-            
-            //// Save candidates for multi-region model
-            //if (p.intensity < setting_.INTENSITY_THRESHOLD || 
-                    //var < setting_.NOISE_THRESHOLD)
-            //{
-                //filtered_region_[q][k].push_back(point);
-                //landmark_.push_back(pp);
-            //}
         }
+        // Change prev_ring_distance for next ring iteration
         prev_ring_distances = curr_ring_distances;
         curr_ring_distances.fill(0);
     } // Finish Filter Obstacles and Save into Multi-Section
@@ -355,18 +317,6 @@ pcl::ModelCoefficients FeatureDetector::estimatePlane_(
     // Segment Planar Model
     seg.setInputCloud(cloud.makeShared());
     seg.segment(inliers, plane_coeff);
-
-    //// Optimize Coefficients
-    //typename pcl::SampleConsensusModel<PointT>::Ptr model = seg.getModel();
-    //Eigen::VectorXf coeff_refined;                                             
-    //Eigen::Vector4f coeff_raw(plane_coeff.values.data());                    
-    //model->optimizeModelCoefficients(inliers.indices, coeff_raw, coeff_refined);
-    //plane_coeff.values.resize(coeff_refined.size());                         
-    //memcpy(&(plane_coeff.values[0]), &coeff_refined[0],                        
-            //coeff_refined.size() * sizeof (float));                             
-    //// Refine inliers                                                          
-    //model.selectWithinDistance(coeff_refined, 
-            //setting_.FIT_PLANE_THRESHOLD, inliers.indices);
 
     if (inliers.indices.size() == 0)
     {
@@ -459,11 +409,6 @@ void FeatureDetector::filterGround_()
     {
         for (int k = 0; k < section_number_; ++k)
         {
-            double a = multi_region_plane_coeff[q][k].values[0];
-            double b = multi_region_plane_coeff[q][k].values[1];
-            double c = multi_region_plane_coeff[q][k].values[2];
-            double d = multi_region_plane_coeff[q][k].values[3];
-
             ground_filter.setModelCoefficients(multi_region_plane_coeff[q][k]);
             ground_filter.setInputCloud(multi_region_[q][k].makeShared());
             
@@ -495,24 +440,47 @@ void FeatureDetector::filterGround_()
 
 void FeatureDetector::extractCurb_()
 {
-    //// Center of Ground
-    //pcl::PointXYZ center(0, 0, -lidar_height_);
+    //// Lidar Origin
+    //pcl::PointXYZ origin(0, 0, 0);
 
     //for (int i = 0; i < ground_.size(); ++i)
     //{
-        //// Sort Point Cloud by Couter Clock-wisely
-        //std::sort(ground_[i].begin(), ground_[i].end(),
-            //[](const pcl::PointWithRange& lhs, const pcl::PointWithRange& rhs)
-            //{
-                //return std::atan2(lhs.y, lhs.x) < std::atan2(rhs.y, rhs.x);
-            //}
-        //);
-
         //int ground_size = ground_[i].size();
-        ////for (int j = 0; j < ground_size; ++j)
         //for (int j = 0; j < ground_size; ++j)
         //{
             //pcl::PointXYZ& point = ground_[i][j];
+
+            //double azimuth = std::atan2(p.y, p.x);
+            //double distance = pcl::euclideanDistance(point, origin);
+
+            //// Compute Multi-Region Segment idx
+            //int q = int(azimuth * 4 / M_PI + 4.5) % 8;
+            //int k = 0;
+            //while (k < section_distances_[q].size() && 
+                    //distance >= section_distances_[q][k])
+            //{
+                //k++;
+            //}
+            //k--;
+
+            //// Planar model coefficients
+            //double a = multi_region_plane_coeff[q][k];
+            //double b = multi_region_plane_coeff
+            //double alpha = std::asin(
+                    //-(a * std::cos(azimuth) + b * std::sin(azimuth)) / c);
+            
+            
+
+
+
+
+
+
+
+
+
+
+
 
             //double theta = std::atan2(std::abs(point.z), 
                     //std::sqrt(std::pow(point.x, 2) + std::pow(point.y, 2)));
@@ -526,6 +494,9 @@ void FeatureDetector::extractCurb_()
             //int idx_next = (j + 1 + ground_size) % ground_size;
             //pcl::PointXYZ& point_prev = ground_[i][idx_prev];
             //pcl::PointXYZ& point_next = ground_[i][idx_next];
+            
+            //if (pcl::euclideanDistance(point_prev, point_next) > 
+                    //setting_.DISCONTINUITY * )
             
             //double dist_xy = std::sqrt(std::pow(point_prev.x - point_next.x, 2) +
                     //std::pow(point_prev.y - point_next.y, 2));
@@ -618,7 +589,7 @@ void FeatureDetector::extractCurb_()
             //a.y = point.y;
             //a.z = point.z;
 
-            //a_test_.push_back(a);
+            //landmark_.push_back(a);
 
             ////debugger::debugColorOutput("point:", point, 3, BK);
             ////debugger::debugColorOutput("n_v:", n_v, 3, BW);
@@ -689,27 +660,6 @@ void FeatureDetector::removeInliner_(pcl::PointCloud<PointT>& cloud,
     extract.setIndices(inliers);
     extract.setNegative(true);
     extract.filter(cloud);
-}
-
-double FeatureDetector::computeClosestDistDiff_(pcl::PointXYZI& point,
-        std::vector<pcl::PointXYZI>& prev_ring)
-{
-    double azimuth = std::atan2(point.y, point.x);
-    double distance = std::sqrt(std::pow(point.y, 2) + std::pow(point.x, 2));
-    double min_azimuth_diff = M_PI;
-    double closest_dist_diff = INFINITY;
-    for (int i = 0; i < prev_ring.size(); ++i)
-    {
-        pcl::PointXYZI& p = prev_ring[i];
-        double azimuth_p = std::atan2(p.y, p.x);
-        if (std::abs(azimuth_p - azimuth) < min_azimuth_diff)
-        {
-            min_azimuth_diff = std::abs(azimuth_p - azimuth);
-            closest_dist_diff = distance - std::sqrt(std::pow(p.x, 2) + std::pow(p.y, 2)); 
-        }
-    }
-
-    return closest_dist_diff;
 }
 
     //for (int i = 0; i < rings_.size(); ++i)
@@ -1220,3 +1170,21 @@ double FeatureDetector::computeClosestDistDiff_(pcl::PointXYZI& point,
     //cloud_received_ = true;
 
     //landmark_.clear();
+            //// Calculate Alignedness with Linear Regression
+            // To filter grass
+            //Eigen::MatrixXd x(2 * setting_.LOCAL_WINDOW_SIZE + 1, 2);
+            //Eigen::VectorXd y(2 * setting_.LOCAL_WINDOW_SIZE + 1);
+            //for (int w = -setting_.LOCAL_WINDOW_SIZE;
+                    //w <= setting_.LOCAL_WINDOW_SIZE; ++w)
+            //{
+                //pcl::PointXYZI& p = rings[i][(j + w + ring_size) % ring_size];
+                //x(w + setting_.LOCAL_WINDOW_SIZE, 0) = 1.0;
+                //x(w + setting_.LOCAL_WINDOW_SIZE, 1) = p.x;
+                //y(w + setting_.LOCAL_WINDOW_SIZE) = p.y;
+            //}
+            //// Pseudo-Inverse
+            //Eigen::MatrixXd pinv_x = x.completeOrthogonalDecomposition().pseudoInverse();
+            //Eigen::Vector2d weights = pinv_x * y;
+
+            //Eigen::VectorXd diff = y - x * weights;
+            //double residual_sum_of_squares = diff.dot(diff);

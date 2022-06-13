@@ -20,6 +20,7 @@
 // Eigen
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
+#include <Eigen/QR>
 
 // PCL
 #include <pcl/point_cloud.h> // PointCloud
@@ -119,8 +120,5 @@ private:
     template <class PointT>
     void removeInliner_(pcl::PointCloud<PointT>& cloud,
             pcl::ModelCoefficients& coeff);
-
-    double computeClosestDistDiff_(pcl::PointXYZI& point,
-            std::vector<pcl::PointXYZI>& prev_ring);
 };
 #endif /* FEATURE_DETECTOR_H */
