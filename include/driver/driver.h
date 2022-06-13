@@ -34,6 +34,8 @@
 // Main Algorithm
 #include "feature_detection/feature_detector.h"
 #include "setting/feature_detector_setting_t.h"
+#include "setting/lidar_setting_t.h"
+
 // Utils
 #include "utils/debugger.h"
 #include "utils/ros_utils.h"
@@ -66,7 +68,8 @@ private:
     // Paramters
     std::string velodyne_topic_;
     double publishing_rate_;
-    feature_detector_setting_t feature_detector_setting_;
+    feature_detector_setting_t detector_setting_;
+    lidar_setting_t lidar_setting_;
 
     // Point Clouds
     pcl::PointCloud<pcl::PointXYZI> raw_cloud_;

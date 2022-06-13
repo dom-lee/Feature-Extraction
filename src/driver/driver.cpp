@@ -47,7 +47,7 @@ Driver::Driver(ros::NodeHandle& nh)
     server.setCallback(boost::bind(&Driver::reconfigParams_, this, _1, _2));
 
     // Construct Feature Detector
-    FeatureDetector feature_detector;
+    FeatureDetector feature_detector(lidar_setting_);
 
     // Wait for Velodyne Point Cloud
     waitForData_();
@@ -59,7 +59,7 @@ Driver::Driver(ros::NodeHandle& nh)
         ros::spinOnce(); 
         if (!rings_[0].empty())
         {
-            feature_detector.setInputCloud(feature_detector_setting_, rings_);
+            feature_detector.setInputCloud(detector_setting_, rings_);
             feature_detector.run();
 
             publishPointCloud_(ground_pub_, feature_detector.getGround());
@@ -107,15 +107,32 @@ bool Driver::getParameters_()
     // Driver Parameters
     ros_utils::checkROSParam(nh_, "velodyne_topic", velodyne_topic_,
             getNameOf(velodyne_topic_), title_name, received_all);
-
     ros_utils::checkROSParam(nh_, "publishing_rate", publishing_rate_,
             getNameOf(publishing_rate_), title_name, received_all);
+
+    // LiDAR Property
+    ros_utils::checkROSParam(nh_, "ring_number", lidar_setting_.ring_number,
+            getNameOf(lidar_setting_.ring_number), title_name, received_all);
+    ros_utils::checkROSParam(nh_, "elevation_angle", 
+            lidar_setting_.elevation_angles,
+            getNameOf(lidar_setting_.elevation_angles), title_name, received_all);
 
     // Default Parameters
     if (!received_all)
     {
         velodyne_topic_  = "/velodyne_points";
         publishing_rate_ = 2;
+        lidar_setting_.ring_number = 32;
+        lidar_setting_.elevation_angles = {-25.0, -15.639, -11.310, -8.843,
+            -7.254, -6.148, -5.333, -4.667, -4.000, -3.667, -3.333, -3.000,
+            -2.667, -2.333, -2.000, -1.667, -1.333, -1.000, -0.667, -0.333,
+            0.000, 0.333, 0.667, 1.000, 1.333, 1.667, 2.333, 3.333, 4.667,
+            7.000, 10.333, 15.000};
+    }
+
+    for (double& angle : lidar_setting_.elevation_angles)
+    {
+        angle *= M_PI / 180;
     }
 
     return received_all;
@@ -136,46 +153,45 @@ void Driver::reconfigParams_(feature_detection::feature_detectionConfig& config,
 {
     ROS_INFO_THROTTLE(1.0, "[Feature Detector] new parameteres requested");
 
-    feature_detector_setting_.RING_TO_ANALYZE       = config.ring_to_analyze;
-    feature_detector_setting_.GROUND_THRESHOLD      = config.ground_threshold;
-    feature_detector_setting_.RING_TO_FIT_BASE      = config.ring_to_fit_base;
-    feature_detector_setting_.FIT_PLANE_THRESHOLD   = config.fit_plane_threshold;
-    feature_detector_setting_.LOCAL_WINDOW_SIZE     = config.local_window_size;
-    feature_detector_setting_.NOISE_THRESHOLD       = config.noise_threshold;
-    feature_detector_setting_.ANGLE_PLANE_THRESHOLD = config.angle_plane_threshold;
-    feature_detector_setting_.SECTION_START_ANGLE   = config.section_start_angle;
-    feature_detector_setting_.SECTION_NUMBER        = config.section_number;
-    feature_detector_setting_.SECTION_DISTANCE      = config.section_distance;
-    feature_detector_setting_.HEIGHT_DIFF_THRESHOLD = config.height_diff_threshold;
-    feature_detector_setting_.CURB_HEIGHT           = config.curb_height;
-    feature_detector_setting_.ANGULAR_RESOLUTION    = config.angular_resolution;
-    feature_detector_setting_.ANGLE_CURB_THRESHOLD  = config.angle_curb_threshold;
-    feature_detector_setting_.DISCONTINUITY         = config.discontinuity;
+    detector_setting_.RING_TO_ANALYZE       = config.ring_to_analyze;
+    detector_setting_.GROUND_THRESHOLD      = config.ground_threshold;
+    detector_setting_.RING_TO_FIT_BASE      = config.ring_to_fit_base;
+    detector_setting_.FIT_PLANE_THRESHOLD   = config.fit_plane_threshold;
+    detector_setting_.LOCAL_WINDOW_SIZE     = config.local_window_size;
+    detector_setting_.NOISE_THRESHOLD       = config.noise_threshold;
+    detector_setting_.ANGLE_BUFFER          = config.angle_buffer;
+    detector_setting_.DIST_DIFF_THRESHOLD   = config.dist_diff_threshold;
+    detector_setting_.ANGLE_DIFF_THRESHOLD  = config.angle_diff_threshold;
+    detector_setting_.HEIGHT_DIFF_THRESHOLD = config.height_diff_threshold;
+    detector_setting_.CURB_HEIGHT           = config.curb_height;
+    detector_setting_.ANGULAR_RESOLUTION    = config.angular_resolution;
+    detector_setting_.ANGLE_CURB_THRESHOLD  = config.angle_curb_threshold;
+    detector_setting_.DISCONTINUITY         = config.discontinuity;
+    detector_setting_.INTENSITY_THRESHOLD   = config.intensity_threshold;
 }
 
 
-void Driver::getClickedPointCallBack_(const geometry_msgs::PointStamped::ConstPtr& msg)
+void Driver::getClickedPointCallBack_(const 
+        geometry_msgs::PointStamped::ConstPtr& msg)
 {
-    pcl::PointXYZ p;
-    p.x = msg->point.x;
-    p.y = msg->point.y;
-    p.z = msg->point.z;
+    pcl::PointXYZ point;
+    point.x = msg->point.x;
+    point.y = msg->point.y;
+    point.z = msg->point.z;
 
     double intensity = 0;
     double min_distance = 10000;
     pcl::PointXYZI closest_point;
-    for (auto& point : raw_cloud_)
+    for (auto& p : raw_cloud_)
     {
         double distance = pcl::euclideanDistance(p, point);
         if (distance < min_distance)
         {
             min_distance = distance;
-            intensity = point.intensity;
-            closest_point = point;
+            intensity = p.intensity;
+            closest_point = p;
         }
     }
-    double theta = std::atan2(std::abs(closest_point.z), std::sqrt(
-            std::pow(closest_point.x, 2) + std::pow(closest_point.y, 2)));
-
-    std::cout << "Intensity: " << intensity << " theta: " << theta << std::endl;
+    double azimuth = std::atan2(closest_point.y, closest_point.x);
+    std::cout << "Intensity: " << intensity << " azimuth: " << azimuth << std::endl;
 }

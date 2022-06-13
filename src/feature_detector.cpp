@@ -10,67 +10,60 @@
 
 using namespace bipedlab;
 
-FeatureDetector::FeatureDetector()
+FeatureDetector::FeatureDetector(lidar_setting_t lidar_setting)
 {
     debugger::debugColorTextOutput("Constructing FeatureDetector", 10, BC);
-   
-    lidar_height_ = 1.5;
     
+    // Set Property
+    ring_number_ = lidar_setting.ring_number;
+    elevation_angles_ = lidar_setting.elevation_angles;
+
+    section_direction_ = {{ 
+            {-1, 0}, {-0.7071, -0.7071}, {0, -1}, {0.7071, -0.7071},
+            {1, 0}, {0.7071, 0.7071}, {0, 1}, {-0.7071, 0.7071} }};
+   
     cloud_received_ = false;
 }
 
 void FeatureDetector::setInputCloud(feature_detector_setting_t setting,
         std::array<pcl::PointCloud<pcl::PointXYZI>, RING_NUMBER>& rings)
 {
+    a_test_.clear();
+    b_test_.clear();
+    landmark_.clear();
+
     setting_ = setting;
 
     // Resize & Clear
+    section_number_ = (setting_.RING_TO_ANALYZE + 1) / 2;
     for (int q = 0; q < 8; ++q)
     {
-        multi_region_[q].resize(setting_.SECTION_NUMBER);
-        filtered_region_[q].resize(setting_.SECTION_NUMBER);
-        for (int k = 0; k < setting_.SECTION_NUMBER; ++k)
+        multi_region_[q].resize(section_number_);
+        filtered_region_[q].resize(section_number_);
+        section_distances_[q].resize(section_number_, 0.0);
+        for (int k = 0; k < section_number_; ++k)
         {
             multi_region_[q][k].clear();
             filtered_region_[q][k].clear();
         }
     }
-    a_test_.clear();
-    b_test_.clear();
 
     // Lidar Origin
     pcl::PointXYZ origin(0, 0, 0);
-
-    // Section Divider
-    section_distance_.resize(setting_.SECTION_NUMBER, 0.0);
-    //double theta = setting_.SECTION_START_ANGLE;
-    //double distance = lidar_height_ * std::tan(theta);
-    for (int k = 1; k < setting_.SECTION_NUMBER; ++k)
-    {
-        section_distance_[k] = setting_.SECTION_DISTANCE * k;
-        //setting_.SECTION_DISTANCE_[k] = lidar_height_ * std::tan(theta);
-        //theta += (M_PI / 2 - setting_.SECTION_START_ANGLE) / setting_.SECTION_NUMBER;
-        debugger::debugColorOutput("Section Distance (" +
-                std::to_string(k + 1) + "/" + std::to_string(setting_.SECTION_NUMBER) +
-                ") : ", section_distance_[k], 1, BC);
-    }
-
-    // Sampling candidate points to fit base planar model
-    pcl::PointCloud<pcl::PointXYZL> candidate_base;
-    for (int i = 0; i < setting_.RING_TO_ANALYZE; ++i)
+    
+    // Sampling Candidates for Base
+    pcl::PointCloud<pcl::PointXYZI> base_candidate;
+    for (int i = 0; i < setting_.RING_TO_FIT_BASE; ++i)
     {
         int ring_size = rings[i].size();
-        debugger::debugColorOutput("# of points in ring" + 
-                std::to_string(i) + " : ", rings_size, 1, BK);
-
-        if (ring_size < setting_.LOCAL_WINDOW_SIZE
+        if (ring_size < setting_.LOCAL_WINDOW_SIZE)
         {
             continue;
         }
 
         // Sort Point Cloud by Couter Clock-wisely
         std::sort(rings[i].begin(), rings[i].end(),
-            [](const pcl::PointXYZ& lhs, const pcl::PointXYZ& rhs)
+            [](const pcl::PointXYZI& lhs, const pcl::PointXYZI& rhs)
             {
                 return std::atan2(lhs.y, lhs.x) < std::atan2(rhs.y, rhs.x);
             }
@@ -82,7 +75,7 @@ void FeatureDetector::setInputCloud(feature_detector_setting_t setting,
         for (int j = 0; j < ring_size; ++j)
         {
             double curr_dist = pcl::euclideanDistance(rings[i][j], origin);
-            diff[j] = (curr_dist - prev_dist) / curr_dist;
+            diff[j] = std::abs(curr_dist - prev_dist) / curr_dist;
             
             prev_dist = curr_dist;
         }
@@ -90,69 +83,213 @@ void FeatureDetector::setInputCloud(feature_detector_setting_t setting,
         // Select Candidates for fitting plane by checking noise
         for (int j = 0; j < ring_size; ++j)
         {
-            pcl::PointXYZI& p = rings[i][j];
-
-            // Convert to PointXYZL from PointXYZ
-            pcl::PointXYZIL point;
-            point.x = p.x;
-            point.y = p.y;
-            point.z = p.z;
-            point.label = i;
-
-            // Calculate and save Segment
-            double angle = std::atan2(point.y, point.x);
-            int q = int(angle * 4 / M_PI + 4.5) % 8;
-
-            double distance = std::sqrt(std::pow(p.x, 2) + std::pow(p.y, 2));
-
-            int k = 0;
-            while (k < setting_.SECTION_NUMBER && distance >= section_distance_[k])
-            {
-                k++;
-            }
-            k--;
-            multi_region_[q][k].push_back(point);
-
             // Calculate noise
             double sum_of_diff = 0.0;
             for (int w = -setting_.LOCAL_WINDOW_SIZE;
                     w <= setting_.LOCAL_WINDOW_SIZE; ++w)
-            n{
+            {
                 sum_of_diff += diff[(j + w + ring_size) % ring_size];
             }
             
             // Filtered Cloud
             if (sum_of_diff < setting_.NOISE_THRESHOLD)
             {
-                if (i < setting_.RING_TO_FIT_BASE)
-                {
-                    candidate_base.push_back(point);
-                }
-                filtered_region_[q][k].push_back(point);
-                b_test_.push_back(p);
+                base_candidate.push_back(rings[i][j]);
             }
         }
-    } // Finish Sampling Candidates
+    } // Finish Sampling Candidates for Base
 
-    if (candidate_base.size() < 3)
+    if (base_candidate.size() < 10)
     {
         PCL_ERROR("Not enough data to estimate a base planar model.\n");
         cloud_received_ = false;
 
         return;
     }
-    
-    // Set Base Plane
-    base_coeff_ = estimatePlane_(candidate_base);
-    lidar_height_ = pcl::pointToPlaneDistance(origin, base_coeff_.values[0],
-            base_coeff_.values[1], base_coeff_.values[2], base_coeff_.values[3]);
-   
-    // Update Base Plane Coefficient
-    //base_coeff_.values[3] -= translation(2,3);
-    debugger::debugColorOutput("Base Coefficients \n", base_coeff_, 2, BG); 
     cloud_received_ = true;
 
-    landmark_.clear();
+    // Set Base Planar Model (ax + by + cz + d = 0)
+    base_coeff_ = estimatePlane_(base_candidate);
+    debugger::debugColorOutput("Base Coefficients \n", base_coeff_, 3, BG); 
+
+    double a = base_coeff_.values[0];
+    double b = base_coeff_.values[1];
+    double c = base_coeff_.values[2];
+    double d = base_coeff_.values[3];
+    // LiDAR height [d]
+    lidar_height_ = d;
+
+    // Perpendicular Base
+    if (c < 0.8)
+    {
+        debugger::debugColorTextOutput("Check Base \n", 2, BG); 
+        return;
+    }
+
+    // Section Boundary Distance
+    for (int q = 0; q < 8; ++q)
+    {
+        double alpha = std::asin(-(a * section_direction_[q].first +
+                b * section_direction_[q].second) / c);
+        double dist_base_to_origin = std::abs(d / c) * std::cos(alpha);
+        for (int k = 1; k < section_number_; ++k)
+        {
+            double elevation_angle = (elevation_angles_[2 * k + 1] +
+                    elevation_angles_[2 * k + 2]) / 2;
+            double theta = alpha - elevation_angle;
+            section_distances_[q][k] = (theta <= 0) ? INFINITY : 
+                    dist_base_to_origin / std::sin(theta);
+
+            debugger::debugColorOutput("Section Distance[" + 
+                    std::to_string(q) + ", " + std::to_string(k) + "]: ",
+                    section_distances_[q][k], 2, BW);
+        }
+
+    }
+
+    // Container for saving min_distance for each azimuth
+    const int azimuth_dividing_number = 360;
+    std::array<double, azimuth_dividing_number> prev_ring_distances;
+    std::array<double, azimuth_dividing_number> curr_ring_distances;
+    prev_ring_distances.fill(0.0);
+    curr_ring_distances.fill(0.0);
+    // Filtering out for multi-region planar model
+    for (int i = 0; i < setting_.RING_TO_ANALYZE; ++i)
+    {
+        //// Sort Point Cloud by Couter Clock-wisely
+        //std::sort(rings[i].begin(), rings[i].end(),
+            //[](const pcl::PointXYZI& lhs, const pcl::PointXYZI& rhs)
+            //{
+                //return std::atan2(lhs.y, lhs.x) < std::atan2(rhs.y, rhs.x);
+            //}
+        //);
+        
+        //// Cacluate Distance from origin(0,0,0) 
+        int ring_size = rings[i].size();
+        //std::vector<double> dist_origin(ring_size, 0.0);
+        //for (int j = 0; j < ring_size; ++j)
+        //{
+            //dist_origin[j] = pcl::euclideanDistance(rings[i][j], origin);
+        //}
+        
+        // Elevation angle of ring
+        double elevation_angle = elevation_angles_[i];
+        double elevation_angle_prev = (i > 0) ?
+                elevation_angles_[i - 1] : -M_PI / 2;
+
+        debugger::debugColorOutput("# of points in ring[" + 
+                std::to_string(i) + "] : ", ring_size, 1, BK);
+        debugger::debugColorOutput("Elevation angle of ring[" +
+                std::to_string(i) + "] : ", elevation_angle, 1, BK);
+
+        for (int j = 0; j < ring_size; ++j)
+        {
+            pcl::PointXYZI& p = rings[i][j];
+
+            double distance = pcl::euclideanDistance(p, origin);
+            double azimuth = std::atan2(p.y, p.x);
+            double alpha = std::asin(
+                    -(a * std::cos(azimuth) + b * std::sin(azimuth)) / c);
+            double dist_base_to_origin = std::abs(d / c) * std::cos(alpha);
+            double theta = alpha - elevation_angle;
+
+            // filter when ray head to sky
+            if (theta <= 0)
+            {
+                continue;
+            }
+
+            // Filter Obstacles with estimated distance
+            double distance_threshold_estimate = dist_base_to_origin /
+                    std::sin(theta + setting_.ANGLE_BUFFER);
+
+            if (distance < distance_threshold_estimate)
+            {
+                continue;
+            }
+
+            int z = int(azimuth * 180 / M_PI + 180) % 360;
+            curr_ring_distances[z] = (curr_ring_distances[z] != 0) ?
+                    std::min(curr_ring_distances[z], distance) : distance;
+
+            // Filter Obstacles with previous ring distance
+            double theta_prev = alpha - elevation_angle_prev;
+            double distance_threshold_iter = prev_ring_distances[z] / 
+                    std::sin(theta + setting_.ANGLE_BUFFER) *
+                    std::sin(theta_prev + setting_.ANGLE_BUFFER);
+
+            if (distance < distance_threshold_iter)
+            {
+                continue;
+            }
+            
+            // Compute Segment idx
+            int q = int(azimuth * 4 / M_PI + 4.5) % 8;
+            int k = 0;
+            while (k < section_distances_[q].size() && 
+                    distance >= section_distances_[q][k])
+            {
+                k++;
+            }
+            k--;
+            
+            // Convert to PointXYZL from PointXYZ
+            pcl::PointXYZL point;
+            point.x = p.x;
+            point.y = p.y;
+            point.z = p.z;
+            point.label = i;
+
+            // Save filtered Points in multi-section
+            multi_region_[q][k].push_back(point); 
+            filtered_region_[q][k].push_back(point);
+
+            //TODO DELETE /////////////////////
+            pcl::PointXYZ pp;
+            pp.x = p.x;
+            pp.y = p.y;
+            pp.z = p.z;
+            if ( (q + k) % 2 == 0)
+            {
+                a_test_.push_back(pp);
+            }
+            else
+            {
+                b_test_.push_back(pp);
+            }
+            ///////////////////////////////////
+
+            //// Calculate Variance
+            //double sum_dist = 0.0;
+            //for (int w = -setting_.LOCAL_WINDOW_SIZE;
+                    //w <= setting_.LOCAL_WINDOW_SIZE; ++w)
+            //{
+                //sum_dist += dist_origin[(j + w + ring_size) % ring_size];
+            //}
+            //double mean_dist = sum_dist / (2 * setting_.LOCAL_WINDOW_SIZE + 1);
+
+            //double var = 0.0;
+            //for (int w = -setting_.LOCAL_WINDOW_SIZE;
+                    //w <= setting_.LOCAL_WINDOW_SIZE; ++w)
+            //{
+                //double dist = dist_origin[(j + w + ring_size) % ring_size];
+                //var += std::pow(dist - mean_dist, 2);
+            //}
+            //var /= (2 * setting_.LOCAL_WINDOW_SIZE + 1);
+            
+            //// Save candidates for multi-region model
+            //if (p.intensity < setting_.INTENSITY_THRESHOLD || 
+                    //var < setting_.NOISE_THRESHOLD)
+            //{
+                //filtered_region_[q][k].push_back(point);
+                //landmark_.push_back(pp);
+            //}
+        }
+        prev_ring_distances = curr_ring_distances;
+        curr_ring_distances.fill(0);
+    } // Finish Filter Obstacles and Save into Multi-Section
+    
+    debugger::debugColorTextOutput("Finish SetInputCloud", 1, BG);
 }
 
 void FeatureDetector::run()
@@ -160,7 +297,7 @@ void FeatureDetector::run()
     if (cloud_received_)
     {
         filterGround_();
-        extractCurb_();
+        //extractCurb_();
     }
 }
 
@@ -209,7 +346,7 @@ pcl::ModelCoefficients FeatureDetector::estimatePlane_(
     // Create the segmentation object
     pcl::SACSegmentation<PointT> seg;
     // Optional
-    seg.setOptimizeCoefficients(true); // To turn off waning message
+    seg.setOptimizeCoefficients(true);
     // Mandatory
     seg.setModelType(pcl::SACMODEL_PLANE);
     seg.setMethodType(pcl::SAC_RANSAC);
@@ -248,72 +385,66 @@ void FeatureDetector::filterGround_()
         ground_[i].clear();
     }
 
-    // Estimate Planar Model for Multi-Region
-    std::array<std::pair<double, double>, 8> section_direction =
-            { { {-1, 0}, {-0.7071, -0.7071}, {0, -1}, {0.7071, -0.7071},
-                {1, 0}, {0.7071, 0.7071}, {0, 1}, {-0.7071, 0.7071} } };
     std::array<std::vector<pcl::ModelCoefficients>, 8> multi_region_plane_coeff;
     for (int q = 0; q < 8; ++q)
     {
-        multi_region_plane_coeff[q].resize(setting_.SECTION_NUMBER);
+        multi_region_plane_coeff[q].resize(section_number_);
 
-        // Estimate Plane Coefficients for closer one
-        for (int k = 0; k < setting_.SECTION_NUMBER; ++k)
+        // Estimate Planar Model for Multi-Region
+        for (int k = 0; k < section_number_; ++k)
         {
-            multi_region_plane_coeff[q][k] = 
-                    estimatePlane_(filtered_region_[q][k]);
+            multi_region_plane_coeff[q][k] = estimatePlane_(filtered_region_[q][k]);
 
             debugger::debugColorOutput("# of Points (q: " + 
                     std::to_string(q) + ", k: " + std::to_string(k) + ")\n", 
-                    filtered_region_[q][k].size(), 2, BB);
+                    multi_region_[q][k].size(), 1, BB);
 
             debugger::debugColorOutput("Plane Coeff (q: " + 
                     std::to_string(q) + ", k: " + std::to_string(k) + ")\n", 
-                    multi_region_plane_coeff[q][k], 2, BB);
+                    multi_region_plane_coeff[q][k], 1, BB);
+            
+            pcl::ModelCoefficients& coeff_prev = (k > 0) ? 
+                    multi_region_plane_coeff[q][k - 1] : base_coeff_;
 
+            // replace with previous section planar model
             if (multi_region_plane_coeff[q][k].values.empty())
             {
-                if (k == 0)
-                {
-                    multi_region_plane_coeff[q][k] = base_coeff_;
-                }
-                else
-                {
-                    multi_region_plane_coeff[q][k] = 
-                            multi_region_plane_coeff[q][k - 1];
-                }
+                multi_region_plane_coeff[q][k] = coeff_prev;
             }
             // Compute Angle Difference with two plane model
             else
             {                
-                pcl::ModelCoefficients& coeff_prev = (k > 0) ? 
-                        multi_region_plane_coeff[q][k - 1] : base_coeff_;
-
-                double angle = computeAngleTwoPlane_(coeff_prev,
+                double angle_diff = computeAngleTwoPlane_(coeff_prev,
                         multi_region_plane_coeff[q][k]);
-                angle = std::min(angle, M_PI - angle);
-
-                double height_diff = computeHeightDiffTwoPlane_(
-                        section_distance_[k], section_direction[q], 
-                        coeff_prev, multi_region_plane_coeff[q][k]);
+                angle_diff = std::min(angle_diff, M_PI - angle_diff);
                 
-                if (std::abs(M_PI / 2 - angle) < setting_.ANGLE_PLANE_THRESHOLD)
+                std::pair<double, double> boundary_point = 
+                        {section_direction_[q].first * section_distances_[q][k],
+                        section_direction_[q].second * section_distances_[q][k]};
+                double height_diff = computeHeightDiffTwoPlane_(boundary_point,
+                        coeff_prev, multi_region_plane_coeff[q][k]); 
+
+                if (M_PI / 2 - angle_diff < setting_.ANGLE_DIFF_THRESHOLD)
                 {
+                    debugger::debugColorTextOutput("Remove Inlier region (q: " + 
+                            std::to_string(q) + ", k: " + std::to_string(k) +
+                            ") : ", 2, BM);
+
+                    // remove points that forms vertical to base
                     removeInliner_(filtered_region_[q][k], 
                             multi_region_plane_coeff[q][k]);
                     k--;
                 }
-                else if (angle > setting_.ANGLE_PLANE_THRESHOLD || 
+                else if (angle_diff > setting_.ANGLE_DIFF_THRESHOLD ||
                         height_diff > setting_.HEIGHT_DIFF_THRESHOLD)
                 {
-                    debugger::debugColorOutput("Angle between region (q: " + 
+                    debugger::debugColorOutput("Angle Diff region (q: " + 
                             std::to_string(q) + ", k: " + std::to_string(k) +
-                            ") : ", angle, 2, BM);
-                    
-                    debugger::debugColorOutput("Distance between region (q: " + 
+                            ") : ", angle_diff, 2, BM);
+                    debugger::debugColorOutput("Height Diff region (q: " + 
                             std::to_string(q) + ", k: " + std::to_string(k) +
                             ") : ", height_diff, 2, BM);
-                    
+
                     multi_region_plane_coeff[q][k] = coeff_prev;
                 }
             }
@@ -326,7 +457,7 @@ void FeatureDetector::filterGround_()
     ground_filter.setModelType(pcl::SACMODEL_PLANE);
     for (int q = 0; q < 8; ++q)
     {
-        for (int k = 0; k < setting_.SECTION_NUMBER; ++k)
+        for (int k = 0; k < section_number_; ++k)
         {
             double a = multi_region_plane_coeff[q][k].values[0];
             double b = multi_region_plane_coeff[q][k].values[1];
@@ -340,151 +471,161 @@ void FeatureDetector::filterGround_()
             ground_filter.filter(filtered_ring);
             for (pcl::PointXYZL& p : filtered_ring)
             {
-                pcl::PointWithRange point;
+                pcl::PointXYZ point;
                 point.x = p.x;
                 point.y = p.y;
                 point.z = p.z;
-                point.range = a * p.x + b * p.y + c * p.z + d;
 
                 ground_[p.label].push_back(point);
             }
         }
     }
-}
-
-void FeatureDetector::extractCurb_()
-{
-    // Center of Ground
-    pcl::PointXYZ center(0, 0, -lidar_height_);
-
+    
+    // Sort Point Cloud by Couter Clock-wisely
     for (int i = 0; i < ground_.size(); ++i)
     {
-        // Sort Point Cloud by Couter Clock-wisely
         std::sort(ground_[i].begin(), ground_[i].end(),
-            [](const pcl::PointWithRange& lhs, const pcl::PointWithRange& rhs)
+            [](const pcl::PointXYZ& lhs, const pcl::PointXYZ& rhs)
             {
                 return std::atan2(lhs.y, lhs.x) < std::atan2(rhs.y, rhs.x);
             }
         );
-
-        int ground_size = ground_[i].size();
-        //for (int j = 0; j < ground_size; ++j)
-        for (int j = 0; j < ground_size; ++j)
-        {
-            pcl::PointWithRange& point = ground_[i][j];
-
-            double theta = std::atan2(std::abs(point.z), 
-                    std::sqrt(std::pow(point.x, 2) + std::pow(point.y, 2)));
-            double delta_xy = pcl::euclideanDistance(center, point) * 
-                    setting_.ANGULAR_RESOLUTION;
-            double delta_z = delta_xy * std::sin(theta);
-            int n_v = setting_.CURB_HEIGHT / std::sin(theta) / delta_xy;
-
-            // Continuity
-            int idx_prev = (j - 1 + ground_size) % ground_size;
-            int idx_next = (j + 1 + ground_size) % ground_size;
-            pcl::PointWithRange& point_prev = ground_[i][idx_prev];
-            pcl::PointWithRange& point_next = ground_[i][idx_next];
-            
-            double dist_xy = std::sqrt(std::pow(point_prev.x - point_next.x, 2) +
-                    std::pow(point_prev.y - point_next.y, 2));
-            double dist_z = std::abs(point_prev.z - point_next.z);
-
-            //// Check Horizonral and Vertical Continuity
-            //if (dist_xy < delta_xy || dist_z < delta_z)
-            //{
-                //continue;
-            //}
-            
-            bool continuity = true;
-            bool elevation_a = true;
-            bool elevation_b = true;
-            Eigen::Vector2f v_a(0, 0);
-            Eigen::Vector2f v_b(0, 0);
-            double max_height_diff = 0.0;
-
-            for (int w = 1; w < n_v + 1 && continuity; ++w)
-            {
-                int idx_a = (j + w + ground_size) % ground_size;
-                int idx_a_prev = (j + w - 1 + ground_size) % ground_size;
-                pcl::PointWithRange& point_a = ground_[i][idx_a];
-                pcl::PointWithRange& point_a_prev = ground_[i][idx_a_prev];
-
-                int idx_b = (j - w + ground_size) % ground_size;
-                int idx_b_prev = (j - w + 1 + ground_size) % ground_size;
-                pcl::PointWithRange& point_b = ground_[i][idx_b];
-                pcl::PointWithRange& point_b_prev = ground_[i][idx_b_prev];
-                
-                double dist_a = pcl::euclideanDistance(point_a, point_a_prev);
-                double dist_b = pcl::euclideanDistance(point_b, point_b_prev);
-                
-                // Check setting_.DISCONTINUITY
-                if (dist_a > setting_.DISCONTINUITY * delta_xy || 
-                        dist_b > setting_.DISCONTINUITY * delta_xy)
-                {
-                    continuity = false;
-                }
-
-                // Check elevation
-                if (point_a.range < point_a_prev.range)
-                {
-                    elevation_a = false;
-                }
-
-                if (point_b.range < point_b_prev.range)
-                {
-                    elevation_b = false;
-                }
-                
-                // Calculating two vector
-                v_a(0) += point_a.x - point.x;
-                v_a(1) += point_a.y - point.y;
-
-                v_b(0) += point_b.x - point.x;
-                v_b(1) += point_b.y - point.y;
-
-                double height_diff = std::max(
-                        std::abs(point_a.range - point.range),
-                        std::abs(point_b.range - point.range));
-                double max_height_diff = std::max(max_height_diff, height_diff);
-            }
-            
-            // setting_.DISCONTINUITY Threshold 
-            if (!continuity)
-            {
-                continue;
-            }
-
-            // average
-            v_a /= n_v;
-            v_b /= n_v;
-            double angle = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
-
-            // Angle Threshold
-            if (angle > setting_.ANGLE_CURB_THRESHOLD)
-            {
-                continue;
-            }
-
-            //// Elevation Check
-            //if (!elevation_a && !elevation_b)
-            //{
-                //continue;
-            //}
-
-            pcl::PointXYZ a;
-            a.x = point.x;
-            a.y = point.y;
-            a.z = point.z;
-
-            a_test_.push_back(a);
-
-            //debugger::debugColorOutput("point:", point, 3, BK);
-            //debugger::debugColorOutput("n_v:", n_v, 3, BW);
-            //debugger::debugColorOutput("angle: ", angle, 3, BB);
-            //debugger::debugColorOutput("Diff: ", max_height_diff, 3, BC);
-        }
     }
+}
+
+void FeatureDetector::extractCurb_()
+{
+    //// Center of Ground
+    //pcl::PointXYZ center(0, 0, -lidar_height_);
+
+    //for (int i = 0; i < ground_.size(); ++i)
+    //{
+        //// Sort Point Cloud by Couter Clock-wisely
+        //std::sort(ground_[i].begin(), ground_[i].end(),
+            //[](const pcl::PointWithRange& lhs, const pcl::PointWithRange& rhs)
+            //{
+                //return std::atan2(lhs.y, lhs.x) < std::atan2(rhs.y, rhs.x);
+            //}
+        //);
+
+        //int ground_size = ground_[i].size();
+        ////for (int j = 0; j < ground_size; ++j)
+        //for (int j = 0; j < ground_size; ++j)
+        //{
+            //pcl::PointXYZ& point = ground_[i][j];
+
+            //double theta = std::atan2(std::abs(point.z), 
+                    //std::sqrt(std::pow(point.x, 2) + std::pow(point.y, 2)));
+            //double delta_xy = pcl::euclideanDistance(center, point) * 
+                    //setting_.ANGULAR_RESOLUTION;
+            //double delta_z = delta_xy * std::sin(theta);
+            //int n_v = setting_.CURB_HEIGHT / std::sin(theta) / delta_xy;
+
+            //// Continuity
+            //int idx_prev = (j - 1 + ground_size) % ground_size;
+            //int idx_next = (j + 1 + ground_size) % ground_size;
+            //pcl::PointXYZ& point_prev = ground_[i][idx_prev];
+            //pcl::PointXYZ& point_next = ground_[i][idx_next];
+            
+            //double dist_xy = std::sqrt(std::pow(point_prev.x - point_next.x, 2) +
+                    //std::pow(point_prev.y - point_next.y, 2));
+            //double dist_z = std::abs(point_prev.z - point_next.z);
+
+            ////// Check Horizonral and Vertical Continuity
+            ////if (dist_xy < delta_xy || dist_z < delta_z)
+            ////{
+                ////continue;
+            ////}
+            
+            //bool continuity = true;
+            //bool elevation_a = true;
+            //bool elevation_b = true;
+            //Eigen::Vector2f v_a(0, 0);
+            //Eigen::Vector2f v_b(0, 0);
+            //double max_height_diff = 0.0;
+
+            //for (int w = 1; w < n_v + 1 && continuity; ++w)
+            //{
+                //int idx_a = (j + w + ground_size) % ground_size;
+                //int idx_a_prev = (j + w - 1 + ground_size) % ground_size;
+                //pcl::PointXYZ& point_a = ground_[i][idx_a];
+                //pcl::PointXYZ& point_a_prev = ground_[i][idx_a_prev];
+
+                //int idx_b = (j - w + ground_size) % ground_size;
+                //int idx_b_prev = (j - w + 1 + ground_size) % ground_size;
+                //pcl::PointXYZ& point_b = ground_[i][idx_b];
+                //pcl::PointXYZ& point_b_prev = ground_[i][idx_b_prev];
+                
+                //double dist_a = pcl::euclideanDistance(point_a, point_a_prev);
+                //double dist_b = pcl::euclideanDistance(point_b, point_b_prev);
+                
+                //// Check setting_.DISCONTINUITY
+                //if (dist_a > setting_.DISCONTINUITY * delta_xy || 
+                        //dist_b > setting_.DISCONTINUITY * delta_xy)
+                //{
+                    //continuity = false;
+                //}
+
+                //// Check elevation
+                //if (point_a.range < point_a_prev.range)
+                //{
+                    //elevation_a = false;
+                //}
+
+                //if (point_b.range < point_b_prev.range)
+                //{
+                    //elevation_b = false;
+                //}
+                
+                //// Calculating two vector
+                //v_a(0) += point_a.x - point.x;
+                //v_a(1) += point_a.y - point.y;
+
+                //v_b(0) += point_b.x - point.x;
+                //v_b(1) += point_b.y - point.y;
+
+                //double height_diff = std::max(
+                        //std::abs(point_a.range - point.range),
+                        //std::abs(point_b.range - point.range));
+                //double max_height_diff = std::max(max_height_diff, height_diff);
+            //}
+            
+            //// setting_.DISCONTINUITY Threshold 
+            //if (!continuity)
+            //{
+                //continue;
+            //}
+
+            //// average
+            //v_a /= n_v;
+            //v_b /= n_v;
+            //double angle = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
+
+            //// Angle Threshold
+            //if (angle > setting_.ANGLE_CURB_THRESHOLD)
+            //{
+                //continue;
+            //}
+
+            ////// Elevation Check
+            ////if (!elevation_a && !elevation_b)
+            ////{
+                ////continue;
+            ////}
+
+            //pcl::PointXYZ a;
+            //a.x = point.x;
+            //a.y = point.y;
+            //a.z = point.z;
+
+            //a_test_.push_back(a);
+
+            ////debugger::debugColorOutput("point:", point, 3, BK);
+            ////debugger::debugColorOutput("n_v:", n_v, 3, BW);
+            ////debugger::debugColorOutput("angle: ", angle, 3, BB);
+            ////debugger::debugColorOutput("Diff: ", max_height_diff, 3, BC);
+        //}
+    //}
 }
 
 double FeatureDetector::computeAngleTwoPlane_(
@@ -504,28 +645,24 @@ double FeatureDetector::computeAngleTwoPlane_(
     return angle;
 }
 
-double FeatureDetector::computeHeightDiffTwoPlane_(const double distance,
-        const std::pair<double, double> section_direction,
+double FeatureDetector::computeHeightDiffTwoPlane_(
+        const std::pair<double, double> boundary_point,
         const pcl::ModelCoefficients& coeff1, 
         const pcl::ModelCoefficients& coeff2)
 {
     double a1 = coeff1.values[0];
     double b1 = coeff1.values[1];
-    double c1 = coeff1.values[2];
     double d1 = coeff1.values[3];
 
     double a2 = coeff2.values[0];
     double b2 = coeff2.values[1];
-    double c2 = coeff2.values[2];
     double d2 = coeff2.values[3];
 
-    double x = section_direction.first * distance;
-    double y = section_direction.second * distance;
+    double x = boundary_point.first;
+    double y = boundary_point.second;
 
-    double dist1 = std::abs(a1 * x + b1 * y + d1) / 
-            std::sqrt(std::pow(a1, 2) + std::pow(b1, 2) + std::pow(c1, 2));
-    double dist2 = std::abs(a2 * x + b2 * y + d2) / 
-            std::sqrt(std::pow(a2, 2) + std::pow(b2, 2) + std::pow(c2, 2));
+    double dist1 = std::abs(a1 * x + b1 * y + d1);
+    double dist2 = std::abs(a2 * x + b2 * y + d2); 
 
     return std::abs(dist1 - dist2);
 }
@@ -553,6 +690,28 @@ void FeatureDetector::removeInliner_(pcl::PointCloud<PointT>& cloud,
     extract.setNegative(true);
     extract.filter(cloud);
 }
+
+double FeatureDetector::computeClosestDistDiff_(pcl::PointXYZI& point,
+        std::vector<pcl::PointXYZI>& prev_ring)
+{
+    double azimuth = std::atan2(point.y, point.x);
+    double distance = std::sqrt(std::pow(point.y, 2) + std::pow(point.x, 2));
+    double min_azimuth_diff = M_PI;
+    double closest_dist_diff = INFINITY;
+    for (int i = 0; i < prev_ring.size(); ++i)
+    {
+        pcl::PointXYZI& p = prev_ring[i];
+        double azimuth_p = std::atan2(p.y, p.x);
+        if (std::abs(azimuth_p - azimuth) < min_azimuth_diff)
+        {
+            min_azimuth_diff = std::abs(azimuth_p - azimuth);
+            closest_dist_diff = distance - std::sqrt(std::pow(p.x, 2) + std::pow(p.y, 2)); 
+        }
+    }
+
+    return closest_dist_diff;
+}
+
     //for (int i = 0; i < rings_.size(); ++i)
     //{
         //ground_[i].clear();
@@ -581,11 +740,11 @@ void FeatureDetector::removeInliner_(pcl::PointCloud<PointT>& cloud,
     //}
 
     //// Compute Section Distance 
-    //std::vector<double> region_distance(setting_.SECTION_NUMBER - 1);
+    //std::vector<double> region_distance(setting_.section_number_ - 1);
     //for (int i = 0; i < region_distance.size(); ++i)
     //{
         //double theta_i = setting_.SECTION_START_ANGLE + 
-                //(90 - setting_.SECTION_START_ANGLE) / (setting_.SECTION_NUMBER - 1) * i;
+                //(90 - setting_.SECTION_START_ANGLE) / (setting_.section_number_ - 1) * i;
         //double distance = lidar_height_ * std::tan(theta_i * M_PI / 180);
         //region_distance[i] = distance;
     //}
@@ -612,7 +771,7 @@ void FeatureDetector::removeInliner_(pcl::PointCloud<PointT>& cloud,
             //{ {-1, 0}, {0, -1}, {1, 0}, {0, 1} };
     //for (int i = 0; i < 4; ++i)
     //{
-        //multi_region_plane_coeff[i].resize(setting_.SECTION_NUMBER);
+        //multi_region_plane_coeff[i].resize(setting_.section_number_);
 
         //// Find initial region
         //int k = 0;
@@ -624,7 +783,7 @@ void FeatureDetector::removeInliner_(pcl::PointCloud<PointT>& cloud,
         //multi_region_plane_coeff[i][k] = estimatePlane(multi_region_[i][k]);
         //saveInlinerToGround(multi_region_[i][k], multi_region_plane_coeff[i][k]);
 
-        //for (k++; k < setting_.SECTION_NUMBER; ++k)
+        //for (k++; k < setting_.section_number_; ++k)
         //{
             //multi_region_plane_coeff[i][k] = estimatePlane(multi_region_[i][k]);
             
@@ -974,3 +1133,90 @@ void FeatureDetector::removeInliner_(pcl::PointCloud<PointT>& cloud,
             //}
         //}
     //} // End of Inter-ring Distance-based Filtering
+        //if (ring_size < setting_.LOCAL_WINDOW_SIZE)
+        //{
+            //continue;
+        //}
+
+        //// Sort Point Cloud by Couter Clock-wisely
+        //std::sort(rings[i].begin(), rings[i].end(),
+            //[](const pcl::PointXYZI& lhs, const pcl::PointXYZI& rhs)
+            //{
+                //return std::atan2(lhs.y, lhs.x) < std::atan2(rhs.y, rhs.x);
+            //}
+        //);
+        
+        //// Cacluate Difference of distance from origin
+        //std::vector<double> diff(ring_size, 0.0);
+        ////double prev_dist = pcl::euclideanDistance(rings[i].back(), origin);
+        //double prev_dist = std::sqrt(std::pow(rings[i].back().x, 2) + 
+                //std::pow(rings[i].back().y, 2));
+        //for (int j = 0; j < ring_size; ++j)
+        //{
+            ////double curr_dist = pcl::euclideanDistance(rings[i][j], origin);
+            //double curr_dist = std::sqrt(std::pow(rings[i][j].x, 2) +
+                    //std::pow(rings[i][j].y, 2));
+            //diff[j] = std::abs(curr_dist - prev_dist) / curr_dist;
+            
+            //prev_dist = curr_dist;
+        //}
+        
+        //// Select Candidates for fitting plane by checking noise
+        //for (int j = 0; j < ring_size; ++j)
+        //{
+            //pcl::PointXYZI& p = rings[i][j];
+
+            //if (p.intensity > setting_.INTENSITY_THRESHOLD)
+            //{
+                //continue;
+            //}
+
+            //// Convert to PointXYZL from PointXYZ
+            //pcl::PointXYZL point;
+            //point.x = p.x;
+            //point.y = p.y;
+            //point.z = p.z;
+            //point.label = i;
+
+            //// Calculate and save Segment
+            //double angle = std::atan2(point.y, point.x);
+            //int q = int(angle * 4 / M_PI + 4.5) % 8;
+
+            ////double distance = std::sqrt(std::pow(point.x, 2) + std::pow(point.y, 2));
+
+            ////int k = 0;
+            ////while (k < setting_.section_number_ && distance >= section_distance_[k])
+            ////{
+                ////k++;
+            ////}
+            ////k--;
+            //multi_region_[q][i/2].push_back(point);
+
+            //// Calculate noise
+            //double sum_of_diff = 0.0;
+            //for (int w = -setting_.LOCAL_WINDOW_SIZE;
+                    //w <= setting_.LOCAL_WINDOW_SIZE; ++w)
+            //{
+                //sum_of_diff += diff[(j + w + ring_size) % ring_size];
+            //}
+            
+            //// Filtered Cloud
+            //if (sum_of_diff < setting_.NOISE_THRESHOLD)
+            //{
+                //pcl::PointXYZ pp;
+                //pp.x = p.x;
+                //pp.y = p.y;
+                //pp.z = p.z;
+                //filtered_region_[q][i/2].push_back(point);
+                //b_test_.push_back(pp);
+                //if (i < setting_.RING_TO_FIT_BASE)
+                //{
+                    //candidate_base.push_back(point);
+                //}
+            //}
+        //}
+    //} // Finish Sampling Candidates
+
+    //cloud_received_ = true;
+
+    //landmark_.clear();

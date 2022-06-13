@@ -5,8 +5,17 @@
     
     <!-- ==================== Publishing Parameters ======================= -->
     <param name="publishing_rate" value="10" /> <!-- Hz -->
+
+    <!-- ==================== LiDAR Settings ============================== -->
+    <param name="ring_number" value="32" />
+    <rosparam param="elevation_angle">[-25.0, -15.639, -11.310, -8.843, -7.254,
+    -6.148, -5.333, -4.667, -4.000, -3.667, -3.333, -3.000, -2.667, -2.333,
+    -2.000, -1.667, -1.333, -1.000, -0.667, -0.333, 0.000, 0.333, 0.667, 1.000,
+    1.333, 1.667, 2.333, 3.333, 4.667, 7.000, 10.333, 15.000]</rosparam> 
+
   </node>
 
-  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find feature_detection)/rviz/osm.rviz" required="false"/>
+  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find
+  feature_detection)/rviz/osm.rviz" required="false"/>
 
 </launch>

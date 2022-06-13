@@ -40,13 +40,14 @@
 
 // Settings
 #include "setting/feature_detector_setting_t.h"
+#include "setting/lidar_setting_t.h"
 
 static const int RING_NUMBER = 32;
 
 class FeatureDetector
 {
 public:
-    FeatureDetector();
+    FeatureDetector(lidar_setting_t lidar_setting);
 
     // Compute Base Plane & get Translation Matrix
     void setInputCloud(feature_detector_setting_t setting,
@@ -60,7 +61,11 @@ public:
     pcl::PointCloud<pcl::PointXYZ>::Ptr getB();
 
 private:
-    // Setting Parameter
+    // Property
+    int ring_number_;
+    std::vector<double> elevation_angles_;
+
+    // Feature Detector Parameter
     feature_detector_setting_t setting_;
 
     // Octant(8) x SECTION_NUMBER matrix of PointCloud
@@ -68,8 +73,13 @@ private:
     std::array<std::vector<pcl::PointCloud<pcl::PointXYZL>>, 8> multi_region_; 
     std::array<std::vector<pcl::PointCloud<pcl::PointXYZL>>, 8> filtered_region_; 
 
-    // x,y,z,diff_ground
-    std::array<pcl::PointCloud<pcl::PointWithRange>, RING_NUMBER> ground_;
+    // section_numer = ceil(RING_TO_ANALYZE / 2)
+    int section_number_;
+    std::array<std::pair<double, double>, 8> section_direction_;
+    std::array<std::vector<double>, 8> section_distances_;
+
+    // x,y,z
+    std::array<pcl::PointCloud<pcl::PointXYZ>, RING_NUMBER> ground_;
 
     pcl::PointCloud<pcl::PointXYZ> landmark_;
     pcl::PointCloud<pcl::PointXYZ> a_test_;
@@ -83,7 +93,6 @@ private:
     // Base Plane model
     pcl::ModelCoefficients base_coeff_;
 
-    std::vector<double> section_distance_;
 
     // Find coefficient of plane and inlier with RANSAC
     template<class PointT>
@@ -102,13 +111,16 @@ private:
             const pcl::ModelCoefficients& coeff1, 
             const pcl::ModelCoefficients& coeff2);
     
-    double computeHeightDiffTwoPlane_(const double distance,
-        const std::pair<double, double> section_direction,
+    double computeHeightDiffTwoPlane_(
+        const std::pair<double, double> boundary_point,
         const pcl::ModelCoefficients& coeff1, 
         const pcl::ModelCoefficients& coeff2);
 
     template <class PointT>
     void removeInliner_(pcl::PointCloud<PointT>& cloud,
             pcl::ModelCoefficients& coeff);
+
+    double computeClosestDistDiff_(pcl::PointXYZI& point,
+            std::vector<pcl::PointXYZI>& prev_ring);
 };
 #endif /* FEATURE_DETECTOR_H */
