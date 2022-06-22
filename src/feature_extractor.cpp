@@ -46,9 +46,6 @@ void FeatureExtractor::setInputCloud(feature_extractor_setting_t setting,
         }
     }
 
-    // Lidar Origin
-    pcl::PointXYZ origin(0, 0, 0);
-    
     // Sampling Candidates for Base
     pcl::PointCloud<pcl::PointXYZI> base_candidate;
     for (int i = 0; i < setting_.RING_TO_FIT_BASE; ++i)
@@ -149,6 +146,9 @@ void FeatureExtractor::setInputCloud(feature_extractor_setting_t setting,
     prev_ring_distances.fill(0.0);
     curr_ring_distances.fill(0.0);
 
+    // Lidar Origin
+    pcl::PointXYZ origin(0, 0, 0);
+    
     // Filtering out for multi-region planar model
     for (int i = 0; i < setting_.RING_TO_ANALYZE; ++i)
     {
@@ -224,19 +224,12 @@ void FeatureExtractor::setInputCloud(feature_extractor_setting_t setting,
                 pcl::PointXYZI& p_next = rings[i][(j + w + 1 + ring_size) % ring_size];
 
                 int idx = w + setting_.LOCAL_WINDOW_SIZE - 1;
-                dist_diff_one[idx] = std::sqrt(
-                        std::pow(p_curr.x - p_prev.x, 2) +
-                        std::pow(p_curr.y - p_prev.y, 2));
-
-                dist_diff_two[idx] = std::sqrt(
-                        std::pow(p_next.x - p_prev.x, 2) +
-                        std::pow(p_next.y - p_prev.y, 2));
+                dist_diff_one[idx] = pcl::euclideanDistance(p_prev, p_curr);
+                dist_diff_two[idx] = pcl::euclideanDistance(p_prev, p_next);
 
                 if (w == setting_.LOCAL_WINDOW_SIZE - 1)
                 {
-                    dist_diff_one[idx + 1] = std::sqrt(
-                            std::pow(p_next.x - p_curr.x, 2) +
-                            std::pow(p_next.y - p_curr.y, 2));
+                    dist_diff_one[idx + 1] = pcl::euclideanDistance(p_curr, p_next);
                 }
             }
 
@@ -589,10 +582,8 @@ void FeatureExtractor::extractCurb_()
             {
                 continue;
             }
-            a_test_.push_back(point);
 
             // 4. Angular & Height Filter
-            //
             // Compute Multi-Region Segment idx
             int q = int(azimuth * 4 / M_PI + 4.5) % 8;
             int k = 0;
@@ -604,14 +595,15 @@ void FeatureExtractor::extractCurb_()
             k--;
 
             // planar model
-            pcl::ModelCoefficients plane_coeff = multi_region_plane_coeff_[q][k];
+            pcl::ModelCoefficients& plane_coeff = multi_region_plane_coeff_[q][k];
             double a = plane_coeff.values[0];
             double b = plane_coeff.values[1];
             double c = plane_coeff.values[2];
             double d = plane_coeff.values[3];
 
+            // Height of point based on the planar model
             double height_point = pcl::pointToPlaneDistanceSigned(point, a, b, c, d);
-            //
+
             // estimated number of points on CURB
             int n_v = setting_.CURB_HEIGHT / std::sin(theta) / delta_xy;
 
@@ -669,9 +661,8 @@ void FeatureExtractor::extractCurb_()
             {
                 continue;
             }
-            b_test_.push_back(point);
 
-            // Threshold (Augluar Filter)
+            // 4. Augluar Filter
             double angle_window = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
             if (angle_window > setting_.ANGLE_CURB_THRESHOLD)
             {
