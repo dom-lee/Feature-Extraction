@@ -1,13 +1,13 @@
 /*******************************************************************************
- * File:        feature_dectector.h
+ * File:        feature_extractor.h
  * 
- * Author:      Dongmyeong Lee (dongmyeong[at]umich.edu)
+ * Author:      Dongmyeong Lee (domlee[at]umich.edu)
  * Created:     05/29/2022
  * 
- * Description: Dectect Curb and boundary of grass with LiDAR and Camera
+ * Description: Extract Curb and boundary of grass with LiDAR
 *******************************************************************************/
-#ifndef FEATURE_DETECTOR_H
-#define FEATURE_DETECTOR_H
+#ifndef FEATURE_EXTRACTOR_H
+#define FEATURE_EXTRACTOR_H
 
 // Standard
 #include <memory>
@@ -40,18 +40,18 @@
 #include "utils/debugger.h"
 
 // Settings
-#include "setting/feature_detector_setting_t.h"
+#include "setting/feature_extractor_setting_t.h"
 #include "setting/lidar_setting_t.h"
 
 static const int RING_NUMBER = 32;
 
-class FeatureDetector
+class FeatureExtractor
 {
 public:
-    FeatureDetector(lidar_setting_t lidar_setting);
+    FeatureExtractor(lidar_setting_t lidar_setting);
 
     // Compute Base Plane & get Translation Matrix
-    void setInputCloud(feature_detector_setting_t setting,
+    void setInputCloud(feature_extractor_setting_t setting,
             std::array<pcl::PointCloud<pcl::PointXYZI>, RING_NUMBER>& rings);
 
     void run();
@@ -66,8 +66,8 @@ private:
     int ring_number_;
     std::vector<double> elevation_angles_;
 
-    // Feature Detector Parameter
-    feature_detector_setting_t setting_;
+    // Feature Extractor Parameter
+    feature_extractor_setting_t setting_;
 
     // Octant(8) x SECTION_NUMBER matrix of PointCloud
     // label = ring_id
@@ -121,4 +121,4 @@ private:
     void removeInliner_(pcl::PointCloud<PointT>& cloud,
             pcl::ModelCoefficients& coeff);
 };
-#endif /* FEATURE_DETECTOR_H */
+#endif /* FEATURE_extractor_H */

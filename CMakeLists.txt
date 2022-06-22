@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0.2)
-project(feature_detection)
+project(feature_extraction)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
@@ -151,7 +151,7 @@ include_directories(
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
 add_executable(${PROJECT_NAME}_node 
-    src/main.cpp src/driver/driver.cpp src/feature_detector.cpp)
+    src/main.cpp src/driver/driver.cpp src/feature_extractor.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the

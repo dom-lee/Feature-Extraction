@@ -1,18 +1,18 @@
 /*******************************************************************************
- * File:        feature_detector.cpp
+ * File:        feature_extractor.cpp
  *
  * Author:      Dongmyeong Lee (domlee[at]umich.edu)
  * Created:     05/30/2022
  *
- * Description: Detect Curb and boundary of grass with LiDAR and Camera
+ * Description: Extract Curb and boundary of grass with LiDAR
 *******************************************************************************/
-#include "feature_detection/feature_detector.h"
+#include "feature_extraction/feature_extractor.h"
 
 using namespace bipedlab;
 
-FeatureDetector::FeatureDetector(lidar_setting_t lidar_setting)
+FeatureExtractor::FeatureExtractor(lidar_setting_t lidar_setting)
 {
-    debugger::debugColorTextOutput("Constructing FeatureDetector", 10, BC);
+    debugger::debugColorTextOutput("Constructing Feature Extractor", 10, BC);
     
     // Set Property
     ring_number_ = lidar_setting.ring_number;
@@ -25,7 +25,7 @@ FeatureDetector::FeatureDetector(lidar_setting_t lidar_setting)
     cloud_received_ = false;
 }
 
-void FeatureDetector::setInputCloud(feature_detector_setting_t setting,
+void FeatureExtractor::setInputCloud(feature_extractor_setting_t setting,
         std::array<pcl::PointCloud<pcl::PointXYZI>, RING_NUMBER>& rings)
 {
     a_test_.clear();
@@ -122,6 +122,7 @@ void FeatureDetector::setInputCloud(feature_detector_setting_t setting,
     }
 
     // Section Boundary Distance
+    // Approximately split section that could contains two rings
     for (int q = 0; q < 8; ++q)
     {
         double alpha = std::asin(-(a * section_direction_[q].first +
@@ -139,7 +140,6 @@ void FeatureDetector::setInputCloud(feature_detector_setting_t setting,
                     std::to_string(q) + ", " + std::to_string(k) + "]: ",
                     section_distances_[q][k], 2, BW);
         }
-
     }
 
     // Container for saving min_distance for each azimuth
@@ -300,7 +300,7 @@ void FeatureDetector::setInputCloud(feature_detector_setting_t setting,
     debugger::debugColorTextOutput("Finish SetInputCloud", 1, BG);
 }
 
-void FeatureDetector::run()
+void FeatureExtractor::run()
 {
     if (cloud_received_)
     {
@@ -309,7 +309,7 @@ void FeatureDetector::run()
     }
 }
 
-pcl::PointCloud<pcl::PointXYZ>::Ptr FeatureDetector::getGround()
+pcl::PointCloud<pcl::PointXYZ>::Ptr FeatureExtractor::getGround()
 {
     pcl::PointCloud<pcl::PointXYZ> ground;
     for (auto& cloud : ground_)
@@ -322,23 +322,23 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr FeatureDetector::getGround()
     return ground.makeShared();
 }
 
-pcl::PointCloud<pcl::PointXYZ>::Ptr FeatureDetector::getLandmark()
+pcl::PointCloud<pcl::PointXYZ>::Ptr FeatureExtractor::getLandmark()
 {
     return landmark_.makeShared();
 }
 
-pcl::PointCloud<pcl::PointXYZ>::Ptr FeatureDetector::getA()
+pcl::PointCloud<pcl::PointXYZ>::Ptr FeatureExtractor::getA()
 {
     return a_test_.makeShared();
 }
 
-pcl::PointCloud<pcl::PointXYZ>::Ptr FeatureDetector::getB()
+pcl::PointCloud<pcl::PointXYZ>::Ptr FeatureExtractor::getB()
 {
     return b_test_.makeShared();
 }
 
 template <class PointT>
-pcl::ModelCoefficients FeatureDetector::estimatePlane_(
+pcl::ModelCoefficients FeatureExtractor::estimatePlane_(
         pcl::PointCloud<PointT>& cloud)
 {
     // Plane Model segmentation with RANSAC
@@ -373,7 +373,7 @@ pcl::ModelCoefficients FeatureDetector::estimatePlane_(
     return plane_coeff;
 }
 
-void FeatureDetector::filterGround_()
+void FeatureExtractor::filterGround_()
 {
     // Clear
     for (int i = 0; i < RING_NUMBER; ++i)
@@ -523,7 +523,7 @@ void FeatureDetector::filterGround_()
     }
 }
 
-void FeatureDetector::extractCurb_()
+void FeatureExtractor::extractCurb_()
 {
     // Lidar Origin
     pcl::PointXYZ origin(0, 0, 0);
@@ -693,7 +693,7 @@ void FeatureDetector::extractCurb_()
     }
 }
 
-double FeatureDetector::computeAngleTwoPlane_(
+double FeatureExtractor::computeAngleTwoPlane_(
         const pcl::ModelCoefficients& coeff1, 
         const pcl::ModelCoefficients& coeff2)
 {
@@ -710,7 +710,7 @@ double FeatureDetector::computeAngleTwoPlane_(
     return angle;
 }
 
-double FeatureDetector::computeHeightDiffTwoPlane_(
+double FeatureExtractor::computeHeightDiffTwoPlane_(
         const std::pair<double, double> boundary_point,
         const pcl::ModelCoefficients& coeff1, 
         const pcl::ModelCoefficients& coeff2)
@@ -733,7 +733,7 @@ double FeatureDetector::computeHeightDiffTwoPlane_(
 }
 
 template <class PointT>
-void FeatureDetector::removeInliner_(pcl::PointCloud<PointT>& cloud, 
+void FeatureExtractor::removeInliner_(pcl::PointCloud<PointT>& cloud, 
         pcl::ModelCoefficients& coeff)
 {
     Eigen::Vector4f plane_coeff;

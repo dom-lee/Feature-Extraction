@@ -1,6 +1,6 @@
 <launch>
-  <node name="feature_detection" pkg="feature_detection"
-  type="feature_detection_node" output="screen" required="true">  
+  <node name="feature_extraction" pkg="feature_extraction"
+  type="feature_extraction_node" output="screen" required="true">  
     <param name="velodyne_topic" value="/velodyne_points"/>
     
     <!-- ==================== Publishing Parameters ======================= -->
@@ -16,6 +16,6 @@
   </node>
 
   <node name="rviz" pkg="rviz" type="rviz" args="-d $(find
-  feature_detection)/rviz/osm.rviz" required="false"/>
+  feature_extraction)/rviz/osm.rviz" required="false"/>
 
 </launch>

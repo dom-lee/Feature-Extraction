@@ -4,7 +4,7 @@
  * Author:      Dongmyeong Lee (domlee[at]umich.edu)
  * Created:     05/30/2022
  *
- * Description: ROS wrapper for the feature detector
+ * Description: ROS wrapper for the Feature Extractor
 *******************************************************************************/
 #include "driver/driver.h"
 
@@ -33,7 +33,7 @@ Driver::Driver(ros::NodeHandle& nh)
             &Driver::getPointCloud_, this);
 
     clicked_point_sub_ = nh_.subscribe("/clicked_point", 1, 
-                    &Driver::getClickedPointCallBack_, this);
+            &Driver::getClickedPointCallBack_, this);
 
     // Publisher
     landmark_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("landmark", 1);
@@ -42,15 +42,11 @@ Driver::Driver(ros::NodeHandle& nh)
     b_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("b", 1);
 
     // Dynamic Reconfiguration
-    dynamic_reconfigure::Server<feature_detection::feature_detectionConfig>
-            server;
+    dynamic_reconfigure::Server<feature_extraction::feature_extractionConfig> server;
     server.setCallback(boost::bind(&Driver::reconfigParams_, this, _1, _2));
 
-    // Construct Feature Detector
-    FeatureDetector feature_detector(lidar_setting_);
-
-    // Wait for Velodyne Point Cloud
-    waitForData_();
+    // Construct Feature Extractor
+    FeatureExtractor feature_extractor(lidar_setting_);
 
     // Run Feature Dectector
     ros::Rate r(publishing_rate_);
@@ -59,13 +55,17 @@ Driver::Driver(ros::NodeHandle& nh)
         ros::spinOnce(); 
         if (!rings_[0].empty())
         {
-            feature_detector.setInputCloud(detector_setting_, rings_);
-            feature_detector.run();
+            feature_extractor.setInputCloud(extractor_setting_, rings_);
+            feature_extractor.run();
 
-            publishPointCloud_(ground_pub_, feature_detector.getGround());
-            publishPointCloud_(landmark_pub_, feature_detector.getLandmark());
-            publishPointCloud_(a_pub_, feature_detector.getA());
-            publishPointCloud_(b_pub_, feature_detector.getB());
+            publishPointCloud_(ground_pub_, feature_extractor.getGround());
+            publishPointCloud_(landmark_pub_, feature_extractor.getLandmark());
+            publishPointCloud_(a_pub_, feature_extractor.getA());
+            publishPointCloud_(b_pub_, feature_extractor.getB());
+        }
+        else
+        {
+            ROS_WARN_ONCE("Wait for point cloud data");
         }
         r.sleep();
     }
@@ -129,7 +129,8 @@ bool Driver::getParameters_()
             0.000, 0.333, 0.667, 1.000, 1.333, 1.667, 2.333, 3.333, 4.667,
             7.000, 10.333, 15.000};
     }
-
+    
+    // Convert LiDAR elevation angles from degree to radian
     for (double& angle : lidar_setting_.elevation_angles)
     {
         angle *= M_PI / 180;
@@ -138,38 +139,28 @@ bool Driver::getParameters_()
     return received_all;
 }
 
-void Driver::waitForData_()
-{
-    while (ros::ok() && point_cloud_sub_.getNumPublishers() < 1)
-    {
-        ROS_WARN_ONCE("Wait for point cloud data");
-        ros::spinOnce();
-        sleep(1);
-    }
-}
-
-void Driver::reconfigParams_(feature_detection::feature_detectionConfig& config,
+void Driver::reconfigParams_(feature_extraction::feature_extractionConfig& config,
         uint32_t level)
 {
-    ROS_INFO_THROTTLE(1.0, "[Feature Detector] new parameteres requested");
+    ROS_INFO_THROTTLE(1.0, "[Feature Extractor] new parameteres requested");
 
-    detector_setting_.RING_TO_ANALYZE       = config.ring_to_analyze;
-    detector_setting_.RING_TO_FIT_BASE      = config.ring_to_fit_base;
-    detector_setting_.FIT_PLANE_THRESHOLD   = config.fit_plane_threshold;
-    detector_setting_.LOCAL_WINDOW_SIZE     = config.local_window_size;
-    detector_setting_.ALIGNEDNESS_THRESHOLD = config.alignedness_threshold;
-    detector_setting_.ANGLE_BUFFER          = config.angle_buffer;
-    detector_setting_.DIST_DIFF_THRESHOLD   = config.dist_diff_threshold;
-    detector_setting_.ANGLE_DIFF_THRESHOLD  = config.angle_diff_threshold;
-    detector_setting_.HEIGHT_DIFF_THRESHOLD = config.height_diff_threshold;
-    detector_setting_.GROUND_THRESHOLD      = config.ground_threshold;
-    detector_setting_.ANGULAR_RESOLUTION    = config.angular_resolution;
-    detector_setting_.GROUND_DISCONTINUITY  = config.ground_discontinuity;
-    detector_setting_.CONTINUED_NUMBER      = config.continued_number;
-    detector_setting_.CURB_HEIGHT           = config.curb_height;
-    detector_setting_.DISCONTINUITY         = config.discontinuity;
-    detector_setting_.ANGLE_CURB_THRESHOLD  = config.angle_curb_threshold;
-    detector_setting_.HEIGHT_CURB_THRESHOLD = config.height_curb_threshold;
+    extractor_setting_.RING_TO_ANALYZE       = config.ring_to_analyze;
+    extractor_setting_.RING_TO_FIT_BASE      = config.ring_to_fit_base;
+    extractor_setting_.FIT_PLANE_THRESHOLD   = config.fit_plane_threshold;
+    extractor_setting_.LOCAL_WINDOW_SIZE     = config.local_window_size;
+    extractor_setting_.ALIGNEDNESS_THRESHOLD = config.alignedness_threshold;
+    extractor_setting_.ANGLE_BUFFER          = config.angle_buffer;
+    extractor_setting_.DIST_DIFF_THRESHOLD   = config.dist_diff_threshold;
+    extractor_setting_.ANGLE_DIFF_THRESHOLD  = config.angle_diff_threshold;
+    extractor_setting_.HEIGHT_DIFF_THRESHOLD = config.height_diff_threshold;
+    extractor_setting_.GROUND_THRESHOLD      = config.ground_threshold;
+    extractor_setting_.ANGULAR_RESOLUTION    = config.angular_resolution;
+    extractor_setting_.GROUND_DISCONTINUITY  = config.ground_discontinuity;
+    extractor_setting_.CONTINUED_NUMBER      = config.continued_number;
+    extractor_setting_.CURB_HEIGHT           = config.curb_height;
+    extractor_setting_.DISCONTINUITY         = config.discontinuity;
+    extractor_setting_.ANGLE_CURB_THRESHOLD  = config.angle_curb_threshold;
+    extractor_setting_.HEIGHT_CURB_THRESHOLD = config.height_curb_threshold;
 }
 
 
@@ -200,7 +191,7 @@ void Driver::getClickedPointCallBack_(const
     double azimuth = std::atan2(closest_point.y, closest_point.x);
     double xy_dist = std::sqrt(std::pow(closest_point.x, 2) +
             std::pow(closest_point.y, 2));
-    double delta_xy = xy_dist * detector_setting_.ANGULAR_RESOLUTION;
+    double delta_xy = xy_dist * extractor_setting_.ANGULAR_RESOLUTION;
     std::cout << "Intesity: " << closest_point.intensity << std::endl;
     std::cout <<  " azimuth: " << azimuth << std::endl;
     std::cout << " xy_dist: " << xy_dist << " delta_xy: " << delta_xy << std::endl;

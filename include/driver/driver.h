@@ -4,7 +4,7 @@
  * Author:      Dongmyeong Lee (domlee[at]umich.edu)
  * Created:     05/30/2022
  *
- * Description: ROS wrapper for the feature detector
+ * Description: ROS wrapper for the Feature Extractor
 *******************************************************************************/
 #ifndef DRIVER_H
 #define DRIVER_H
@@ -19,7 +19,7 @@
 
 // Dynamic Configuration
 #include <dynamic_reconfigure/server.h>
-#include <feature_detection/feature_detectionConfig.h>
+#include <feature_extraction/feature_extractionConfig.h>
 
 // PCL
 #include <pcl/point_cloud.h> // PointCloud
@@ -32,8 +32,8 @@
 #include <geometry_msgs/PointStamped.h>
 
 // Main Algorithm
-#include "feature_detection/feature_detector.h"
-#include "setting/feature_detector_setting_t.h"
+#include "feature_extraction/feature_extractor.h"
+#include "setting/feature_extractor_setting_t.h"
 #include "setting/lidar_setting_t.h"
 
 // Utils
@@ -49,9 +49,6 @@ public:
     Driver(ros::NodeHandle& nh);
 
 private:
-    // Pthread
-    pthread_mutex_t lock_;
-
     // ROS
     ros::NodeHandle nh_;
 
@@ -68,7 +65,7 @@ private:
     // Paramters
     std::string velodyne_topic_;
     double publishing_rate_;
-    feature_detector_setting_t detector_setting_;
+    feature_extractor_setting_t extractor_setting_;
     lidar_setting_t lidar_setting_;
 
     // Point Clouds
@@ -84,9 +81,8 @@ private:
 
     void waitForData_();
 
-    void reconfigParams_(feature_detection::feature_detectionConfig& config,
-            uint32_t level);
+    void reconfigParams_(feature_extraction::feature_extractionConfig& config, uint32_t level);
 
     void getClickedPointCallBack_(const geometry_msgs::PointStamped::ConstPtr& msg);
 };
-#endif /* DRIBER_H */
+#endif /* DRIVER_H */

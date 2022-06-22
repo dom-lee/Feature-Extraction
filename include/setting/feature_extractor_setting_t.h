@@ -1,7 +1,7 @@
-#ifndef FEATURE_DETECTOR_SETTING_H
-#define FEATURE_DETECTOR_SETTING_H
+#ifndef FEATURE_EXTRACTOR_SETTING_H
+#define FEATURE_EXTRACTOR_SETTING_H
 
-typedef struct feature_detector_setting
+typedef struct feature_extractor_setting
 {
     int    RING_TO_ANALYZE;
     int    RING_TO_FIT_BASE;
@@ -20,5 +20,5 @@ typedef struct feature_detector_setting
     double DISCONTINUITY;
     double ANGLE_CURB_THRESHOLD;
     double HEIGHT_CURB_THRESHOLD;
-} feature_detector_setting_t;
-#endif /* FEATURE_DETECTOR_SETTING_H */
+} feature_extractor_setting_t;
+#endif /* FEATURE_EXTRACTOR_SETTING_H */
