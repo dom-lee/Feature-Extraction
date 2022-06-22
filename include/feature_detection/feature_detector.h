@@ -93,7 +93,7 @@ private:
     
     // Base Plane model
     pcl::ModelCoefficients base_coeff_;
-
+    std::array<std::vector<pcl::ModelCoefficients>, 8> multi_region_plane_coeff_;
 
     // Find coefficient of plane and inlier with RANSAC
     template<class PointT>

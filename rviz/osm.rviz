@@ -94,10 +94,10 @@ Visualization Manager:
       Axis: Z
       Channel Name: intensity
       Class: rviz/PointCloud2
-      Color: 173; 127; 168
+      Color: 115; 210; 22
       Color Transformer: FlatColor
       Decay Time: 0
-      Enabled: false
+      Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Min Color: 0; 0; 0
@@ -105,14 +105,14 @@ Visualization Manager:
       Position Transformer: XYZ
       Queue Size: 10
       Selectable: true
-      Size (Pixels): 3
+      Size (Pixels): 10
       Size (m): 0.009999999776482582
       Style: Points
       Topic: /feature_detection/landmark
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
-      Value: false
+      Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -125,7 +125,7 @@ Visualization Manager:
       Color: 114; 159; 207
       Color Transformer: FlatColor
       Decay Time: 0
-      Enabled: false
+      Enabled: true
       Invert Rainbow: false
       Max Color: 115; 210; 22
       Min Color: 0; 0; 0
@@ -140,7 +140,7 @@ Visualization Manager:
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
-      Value: false
+      Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -161,7 +161,7 @@ Visualization Manager:
       Position Transformer: XYZ
       Queue Size: 10
       Selectable: true
-      Size (Pixels): 2
+      Size (Pixels): 5
       Size (m): 0.009999999776482582
       Style: Points
       Topic: /feature_detection/a
@@ -189,7 +189,7 @@ Visualization Manager:
       Position Transformer: XYZ
       Queue Size: 10
       Selectable: true
-      Size (Pixels): 2
+      Size (Pixels): 10
       Size (m): 0.009999999776482582
       Style: Points
       Topic: /feature_detection/b
@@ -225,7 +225,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 184.81858825683594
+      Distance: 142.6240692138672
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -233,17 +233,17 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: 40.375614166259766
-        Y: 1.6945078372955322
-        Z: 5.368453502655029
+        X: 24.27980613708496
+        Y: 12.791694641113281
+        Z: -12.22134780883789
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.9253971576690674
+      Pitch: 1.005397081375122
       Target Frame: <Fixed Frame>
-      Yaw: 1.9104244709014893
+      Yaw: 3.3004322052001953
     Saved: ~
 Window Geometry:
   Displays:
@@ -261,5 +261,5 @@ Window Geometry:
   Views:
     collapsed: true
   Width: 1860
-  X: 784
+  X: 60
   Y: 1467

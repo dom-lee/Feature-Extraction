@@ -154,7 +154,6 @@ void Driver::reconfigParams_(feature_detection::feature_detectionConfig& config,
     ROS_INFO_THROTTLE(1.0, "[Feature Detector] new parameteres requested");
 
     detector_setting_.RING_TO_ANALYZE       = config.ring_to_analyze;
-    detector_setting_.GROUND_THRESHOLD      = config.ground_threshold;
     detector_setting_.RING_TO_FIT_BASE      = config.ring_to_fit_base;
     detector_setting_.FIT_PLANE_THRESHOLD   = config.fit_plane_threshold;
     detector_setting_.LOCAL_WINDOW_SIZE     = config.local_window_size;
@@ -163,10 +162,14 @@ void Driver::reconfigParams_(feature_detection::feature_detectionConfig& config,
     detector_setting_.DIST_DIFF_THRESHOLD   = config.dist_diff_threshold;
     detector_setting_.ANGLE_DIFF_THRESHOLD  = config.angle_diff_threshold;
     detector_setting_.HEIGHT_DIFF_THRESHOLD = config.height_diff_threshold;
-    detector_setting_.CURB_HEIGHT           = config.curb_height;
+    detector_setting_.GROUND_THRESHOLD      = config.ground_threshold;
     detector_setting_.ANGULAR_RESOLUTION    = config.angular_resolution;
-    detector_setting_.ANGLE_CURB_THRESHOLD  = config.angle_curb_threshold;
+    detector_setting_.GROUND_DISCONTINUITY  = config.ground_discontinuity;
+    detector_setting_.CONTINUED_NUMBER      = config.continued_number;
+    detector_setting_.CURB_HEIGHT           = config.curb_height;
     detector_setting_.DISCONTINUITY         = config.discontinuity;
+    detector_setting_.ANGLE_CURB_THRESHOLD  = config.angle_curb_threshold;
+    detector_setting_.HEIGHT_CURB_THRESHOLD = config.height_curb_threshold;
 }
 
 
@@ -178,19 +181,28 @@ void Driver::getClickedPointCallBack_(const
     point.y = msg->point.y;
     point.z = msg->point.z;
 
-    double intensity = 0;
+    double elevation_angle;
     double min_distance = 10000;
     pcl::PointXYZI closest_point;
-    for (auto& p : raw_cloud_)
+    for (int i = 0; i < rings_.size(); ++i)
     {
-        double distance = pcl::euclideanDistance(p, point);
-        if (distance < min_distance)
+        for (auto& p : rings_[i])
         {
-            min_distance = distance;
-            intensity = p.intensity;
-            closest_point = p;
+            double distance = pcl::euclideanDistance(p, point);
+            if (distance < min_distance)
+            {
+                min_distance = distance;
+                closest_point = p;
+                elevation_angle = -lidar_setting_.elevation_angles[i] * M_PI/180;
+            }
         }
     }
     double azimuth = std::atan2(closest_point.y, closest_point.x);
-    std::cout << "Intensity: " << intensity << " azimuth: " << azimuth << std::endl;
+    double xy_dist = std::sqrt(std::pow(closest_point.x, 2) +
+            std::pow(closest_point.y, 2));
+    double delta_xy = xy_dist * detector_setting_.ANGULAR_RESOLUTION;
+    std::cout << "Intesity: " << closest_point.intensity << std::endl;
+    std::cout <<  " azimuth: " << azimuth << std::endl;
+    std::cout << " xy_dist: " << xy_dist << " delta_xy: " << delta_xy << std::endl;
+    std::cout << "z: " << closest_point.z << " delta_z: " << delta_xy * std::sin(elevation_angle) << std::endl;
 }

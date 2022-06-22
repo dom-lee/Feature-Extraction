@@ -13,9 +13,12 @@ typedef struct feature_detector_setting
     double ANGLE_DIFF_THRESHOLD;
     double HEIGHT_DIFF_THRESHOLD;
     double GROUND_THRESHOLD;
-    double CURB_HEIGHT;
     double ANGULAR_RESOLUTION;
-    double ANGLE_CURB_THRESHOLD;
+    double GROUND_DISCONTINUITY;
+    int    CONTINUED_NUMBER;
+    double CURB_HEIGHT;
     double DISCONTINUITY;
+    double ANGLE_CURB_THRESHOLD;
+    double HEIGHT_CURB_THRESHOLD;
 } feature_detector_setting_t;
 #endif /* FEATURE_DETECTOR_SETTING_H */
