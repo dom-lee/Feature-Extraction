@@ -618,7 +618,8 @@ void FeatureExtractor::extractCurb_()
                 
                 double x_diff = p_a.x - point.x;
                 double y_diff = p_a.y - point.y;
-                double height_diff = pcl::pointToPlaneDistanceSigned(p_a, a, b, c, d) - height_point;
+                double height_diff = pcl::pointToPlaneDistanceSigned(p_a, a, b, c, d) -
+                                     height_point;
 
                 dist_diff_a = std::sqrt(std::pow(x_diff, 2) + std::pow(y_diff, 2));
                 distance_xy_a = std::sqrt(std::pow(p_a.x, 2) + std::pow(p_a.y, 2));
@@ -642,7 +643,8 @@ void FeatureExtractor::extractCurb_()
                 
                 double x_diff = p_b.x - point.x;
                 double y_diff = p_b.y - point.y;
-                double height_diff = pcl::pointToPlaneDistanceSigned(p_b, a, b, c, d) - height_point;
+                double height_diff = pcl::pointToPlaneDistanceSigned(p_b, a, b, c, d) - 
+                                     height_point;
 
                 dist_diff_b = std::sqrt(std::pow(x_diff, 2) + std::pow(y_diff, 2));
                 distance_xy_b = std::sqrt(std::pow(p_b.x, 2) + std::pow(p_b.y, 2));

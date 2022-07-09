@@ -55,6 +55,7 @@ Driver::Driver(ros::NodeHandle& nh)
         ros::spinOnce(); 
         if (!rings_[0].empty())
         {
+            debugger::debugColorTextOutput("[Driver] Received Point Cloud")
             feature_extractor.setInputCloud(extractor_setting_, rings_);
             feature_extractor.run();
 
@@ -65,7 +66,7 @@ Driver::Driver(ros::NodeHandle& nh)
         }
         else
         {
-            ROS_WARN_ONCE("Wait for point cloud data");
+            ROS_WARN_ONCE("Wait for Point Cloud data");
         }
         r.sleep();
     }

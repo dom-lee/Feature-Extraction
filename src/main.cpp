@@ -10,7 +10,7 @@
 
 #include "driver/driver.h"
 
-int DEBUG_LEVEL = 1;
+int DEBUG_LEVEL = 10;
 
 int main(int argc, char** argv)
 {
@@ -18,7 +18,6 @@ int main(int argc, char** argv)
     ros::NodeHandle nh("~");
 
     Driver driver(nh);
-    ros::spin();
     
     return 0;
 }
