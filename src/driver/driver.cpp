@@ -55,7 +55,7 @@ Driver::Driver(ros::NodeHandle& nh)
         ros::spinOnce(); 
         if (!rings_[0].empty())
         {
-            debugger::debugColorTextOutput("[Driver] Received Point Cloud")
+            ROS_INFO_ONCE("[Driver] Received Point Cloud");
             feature_extractor.setInputCloud(extractor_setting_, rings_);
             feature_extractor.run();
 
