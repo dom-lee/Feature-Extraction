@@ -75,7 +75,6 @@ Driver::Driver(ros::NodeHandle& nh)
 void Driver::getPointCloud_(const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 {
     pcl::fromROSMsg(*cloud_msg, raw_cloud_);
-
     // Update rings (array of pcl::PointCloud<pcl::PointXYZI)
     for (int i = 0; i < VELODYNE_RING_NUMBER; ++i)
     {
@@ -86,9 +85,15 @@ void Driver::getPointCloud_(const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
     sensor_msgs::PointCloud2ConstIterator<int> iter_ring(*cloud_msg, "ring");
     for (int i = 0; iter_ring != iter_ring.end(); ++iter_ring, ++i)
     {
+        if (*iter_ring >= rings_.size())
+        {
+            continue;
+        }
+
+        std::cout << *iter_ring << "  " << i << std::endl;
         rings_[*iter_ring].push_back(raw_cloud_[i]);
     }
-
+    std::cout << "$$$" << std::endl;
 }
 
 void Driver::publishPointCloud_(ros::Publisher& publisher, 
