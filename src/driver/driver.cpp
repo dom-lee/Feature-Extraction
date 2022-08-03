@@ -88,7 +88,9 @@ void Driver::getPointCloud_(const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
     {
         rings_[*iter_ring].push_back(raw_cloud_[i]);
     }
-
+    
+    // Save Time Stamp for TF
+    cloud_msg_stamp_ = cloud_msg->header.stamp;
 }
 
 void Driver::publishPointCloud_(ros::Publisher& publisher, 
@@ -97,6 +99,7 @@ void Driver::publishPointCloud_(ros::Publisher& publisher,
     sensor_msgs::PointCloud2 msg;
     pcl::toROSMsg(*cloud, msg);
     msg.header.frame_id = "velodyne";
+    msg.header.stamp = cloud_msg_stamp_;
     publisher.publish(msg);
 }
 

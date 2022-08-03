@@ -71,6 +71,7 @@ private:
     // Point Clouds
     pcl::PointCloud<pcl::PointXYZI> raw_cloud_;
     std::array<pcl::PointCloud<pcl::PointXYZI>, VELODYNE_RING_NUMBER> rings_; 
+    ros::Time cloud_msg_stamp_;
 
     void getPointCloud_(const sensor_msgs::PointCloud2ConstPtr& cloud_msg);
 
