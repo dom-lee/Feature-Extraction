@@ -7,5 +7,6 @@ typedef struct lidar_setting
 {
     int ring_number;
     std::vector<double> elevation_angles;
+    double height;
 } lidar_setting_t;
 #endif /* LIDAR_SETTING_H */

@@ -4,21 +4,33 @@
 typedef struct feature_extractor_setting
 {
     int    RING_TO_ANALYZE;
-    int    RING_TO_FIT_BASE;
     double FIT_PLANE_THRESHOLD;
-    int    LOCAL_WINDOW_SIZE;
-    double ALIGNEDNESS_THRESHOLD;
+    double ANGULAR_RESOLUTION;
+
+    // Parameter for Filtering Obstacles
+    int    RING_TO_FIT_BASE;
+    double BASE_BUFFER;
     double ANGLE_BUFFER;
-    double DIST_DIFF_THRESHOLD;
+    
+    // Parameter for Estimate Ground
     double ANGLE_DIFF_THRESHOLD;
     double HEIGHT_DIFF_THRESHOLD;
     double GROUND_THRESHOLD;
-    double ANGULAR_RESOLUTION;
     double GROUND_DISCONTINUITY;
     int    CONTINUED_NUMBER;
+
+    // Parameter for Road Model Estimation
+    int    BEAM_SECTION_NUMBER;
+    double ROAD_VIEW_RANGE;
+
+    // Parameter for Curb Extraction
+    int    SMOOTH_WINDOW_SIZE;
+    double SMOOTH_THRESHOLD_GRASS;
+    double SMOOTH_THRESHOLD_PLANE;
     double CURB_HEIGHT;
-    double DISCONTINUITY;
-    double ANGLE_CURB_THRESHOLD;
-    double HEIGHT_CURB_THRESHOLD;
+    int    CURB_WINDOW_SIZE;
+    double CURB_HEIGHT_THRESHOLD;
+    double CURB_ANGLE_THRESHOLD;
+    int    DISCONTINUITY;
 } feature_extractor_setting_t;
 #endif /* FEATURE_EXTRACTOR_SETTING_H */

@@ -29,8 +29,8 @@ Driver::Driver(ros::NodeHandle& nh)
     }
 
     // Subscriber
-    point_cloud_sub_ = nh_.subscribe(velodyne_topic_, 1,
-            &Driver::getPointCloud_, this);
+    point_cloud_sub_ = nh_.subscribe(pointcloud_topic_, 1,
+            &Driver::getCloudCallback_, this);
 
     clicked_point_sub_ = nh_.subscribe("/clicked_point", 1, 
             &Driver::getClickedPointCallBack_, this);
@@ -40,13 +40,15 @@ Driver::Driver(ros::NodeHandle& nh)
     ground_pub_   = nh_.advertise<sensor_msgs::PointCloud2>("ground", 1);
     a_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("a", 1);
     b_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("b", 1);
+    c_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("c", 1);
+    beam_pub_ = nh_.advertise<visualization_msgs::Marker>("beam", 1, true);
 
     // Dynamic Reconfiguration
     dynamic_reconfigure::Server<feature_extraction::feature_extractionConfig> server;
     server.setCallback(boost::bind(&Driver::reconfigParams_, this, _1, _2));
 
     // Construct Feature Extractor
-    FeatureExtractor feature_extractor(lidar_setting_);
+    feature_extractor_ = std::make_unique<FeatureExtractor>(lidar_setting_);
 
     // Run Feature Dectector
     ros::Rate r(publishing_rate_);
@@ -56,13 +58,23 @@ Driver::Driver(ros::NodeHandle& nh)
         if (!rings_[0].empty())
         {
             ROS_INFO_ONCE("[Driver] Received Point Cloud");
-            feature_extractor.setInputCloud(extractor_setting_, rings_);
-            feature_extractor.run();
+            if (is_extractor_setting_changed_)
+            {
+                feature_extractor_->changeSetting(extractor_setting_);
+                is_extractor_setting_changed_ = false;
+            }
 
-            publishPointCloud_(ground_pub_, feature_extractor.getGround());
-            publishPointCloud_(landmark_pub_, feature_extractor.getLandmark());
-            publishPointCloud_(a_pub_, feature_extractor.getA());
-            publishPointCloud_(b_pub_, feature_extractor.getB());
+            feature_extractor_->setInputCloud(rings_);
+            feature_extractor_->run();
+
+            publishPointCloud_(ground_pub_, feature_extractor_->getGround());
+            publishPointCloud_(landmark_pub_, feature_extractor_->getLandmark());
+
+            publishPointCloud_(a_pub_, feature_extractor_->getA());
+            publishPointCloud_(b_pub_, feature_extractor_->getB());
+            publishPointCloud_(c_pub_, feature_extractor_->getC());
+            visualizeBeam_(beam_pub_, 1, "lower beam",
+                           feature_extractor_->getBeamA());
         }
         else
         {
@@ -72,11 +84,15 @@ Driver::Driver(ros::NodeHandle& nh)
     }
 }
 
-void Driver::getPointCloud_(const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
+void Driver::getCloudCallback_(const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 {
+    debugger::debugColorTextOutput("[Driver] PointCloud Callback", 3, BC);
     pcl::fromROSMsg(*cloud_msg, raw_cloud_);
 
-    // Update rings (array of pcl::PointCloud<pcl::PointXYZI)
+    // Save Time Stamp for TF
+    cloud_msg_stamp_ = cloud_msg->header.stamp;
+
+    // Update rings (array of pcl::PointCloud<pcl::PointXYZ)
     for (int i = 0; i < VELODYNE_RING_NUMBER; ++i)
     {
         rings_[i].clear();
@@ -88,19 +104,52 @@ void Driver::getPointCloud_(const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
     {
         rings_[*iter_ring].push_back(raw_cloud_[i]);
     }
-    
-    // Save Time Stamp for TF
-    cloud_msg_stamp_ = cloud_msg->header.stamp;
 }
 
 void Driver::publishPointCloud_(ros::Publisher& publisher, 
-        const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud)
+                                const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud)
 {
     sensor_msgs::PointCloud2 msg;
+
     pcl::toROSMsg(*cloud, msg);
-    msg.header.frame_id = "velodyne";
+    msg.header.frame_id = publisher_frame_;
     msg.header.stamp = cloud_msg_stamp_;
+
     publisher.publish(msg);
+}
+
+void Driver::visualizeBeam_(ros::Publisher& publisher,
+                            int id, std::string name,
+                            std::vector<std::pair<double, double>> beam)
+{
+    visualization_msgs::Marker line_list;
+
+    line_list.id = id;
+    line_list.ns = name;
+    line_list.type = visualization_msgs::Marker::LINE_LIST;
+    line_list.header.frame_id = "velodyne";
+    line_list.header.stamp = ros::Time::now();
+    line_list.lifetime = ros::Duration();
+    line_list.action = visualization_msgs::Marker::ADD;
+    line_list.pose.orientation.w = 1.0;
+
+    line_list.scale.x = 1;
+
+    line_list.color.g = 1.0f;
+    line_list.color.a = 0.5;
+
+    geometry_msgs::Point p;
+
+    for (const auto& point : beam)
+    {
+        p.x = point.first;
+        p.y = point.second;
+        p.z = 0;
+
+        line_list.points.push_back(p);
+    }
+    
+    publisher.publish(line_list);
 }
 
 bool Driver::getParameters_()
@@ -109,22 +158,25 @@ bool Driver::getParameters_()
     bool received_all = true;
     
     // Driver Parameters
-    ros_utils::checkROSParam(nh_, "velodyne_topic", velodyne_topic_,
-            getNameOf(velodyne_topic_), title_name, received_all);
+    ros_utils::checkROSParam(nh_, "pointcloud_topic", pointcloud_topic_,
+            getNameOf(pointcloud_topic_), title_name, received_all);
     ros_utils::checkROSParam(nh_, "publishing_rate", publishing_rate_,
             getNameOf(publishing_rate_), title_name, received_all);
+    ros_utils::checkROSParam(nh_, "publisher_frame", publisher_frame_,
+            getNameOf(publisher_frame_), title_name, received_all);
 
     // LiDAR Property
+    ros_utils::checkROSParam(nh_, "lidar_height", lidar_setting_.height,
+            getNameOf(lidar_setting_.height), title_name, received_all);
     ros_utils::checkROSParam(nh_, "ring_number", lidar_setting_.ring_number,
             getNameOf(lidar_setting_.ring_number), title_name, received_all);
-    ros_utils::checkROSParam(nh_, "elevation_angle", 
-            lidar_setting_.elevation_angles,
+    ros_utils::checkROSParam(nh_, "elevation_angle", lidar_setting_.elevation_angles,
             getNameOf(lidar_setting_.elevation_angles), title_name, received_all);
 
     // Default Parameters
     if (!received_all)
     {
-        velodyne_topic_  = "/velodyne_points";
+        pointcloud_topic_  = "/velodyne_points";
         publishing_rate_ = 2;
         lidar_setting_.ring_number = 32;
         lidar_setting_.elevation_angles = {-25.0, -15.639, -11.310, -8.843,
@@ -147,24 +199,38 @@ void Driver::reconfigParams_(feature_extraction::feature_extractionConfig& confi
         uint32_t level)
 {
     ROS_INFO_THROTTLE(1.0, "[Feature Extractor] new parameteres requested");
+    is_extractor_setting_changed_ = true;
 
-    extractor_setting_.RING_TO_ANALYZE       = config.ring_to_analyze;
-    extractor_setting_.RING_TO_FIT_BASE      = config.ring_to_fit_base;
-    extractor_setting_.FIT_PLANE_THRESHOLD   = config.fit_plane_threshold;
-    extractor_setting_.LOCAL_WINDOW_SIZE     = config.local_window_size;
-    extractor_setting_.ALIGNEDNESS_THRESHOLD = config.alignedness_threshold;
-    extractor_setting_.ANGLE_BUFFER          = config.angle_buffer;
-    extractor_setting_.DIST_DIFF_THRESHOLD   = config.dist_diff_threshold;
-    extractor_setting_.ANGLE_DIFF_THRESHOLD  = config.angle_diff_threshold;
-    extractor_setting_.HEIGHT_DIFF_THRESHOLD = config.height_diff_threshold;
-    extractor_setting_.GROUND_THRESHOLD      = config.ground_threshold;
-    extractor_setting_.ANGULAR_RESOLUTION    = config.angular_resolution;
-    extractor_setting_.GROUND_DISCONTINUITY  = config.ground_discontinuity;
-    extractor_setting_.CONTINUED_NUMBER      = config.continued_number;
-    extractor_setting_.CURB_HEIGHT           = config.curb_height;
-    extractor_setting_.DISCONTINUITY         = config.discontinuity;
-    extractor_setting_.ANGLE_CURB_THRESHOLD  = config.angle_curb_threshold;
-    extractor_setting_.HEIGHT_CURB_THRESHOLD = config.height_curb_threshold;
+    extractor_setting_.RING_TO_ANALYZE        = config.ring_to_analyze;
+    extractor_setting_.FIT_PLANE_THRESHOLD    = config.fit_plane_threshold;
+    extractor_setting_.ANGULAR_RESOLUTION     = config.angular_resolution;
+    
+    // Parameters for Obstacle Filter
+    extractor_setting_.RING_TO_FIT_BASE       = config.ring_to_fit_base;
+    extractor_setting_.BASE_BUFFER            = config.base_buffer;
+    extractor_setting_.ANGLE_BUFFER           = config.angle_buffer;
+
+    // Parameters for Ground Estimation
+    extractor_setting_.ANGLE_DIFF_THRESHOLD   = config.angle_diff_threshold;
+    extractor_setting_.HEIGHT_DIFF_THRESHOLD  = config.height_diff_threshold;
+    extractor_setting_.GROUND_THRESHOLD       = config.ground_threshold;
+    extractor_setting_.GROUND_DISCONTINUITY   = config.ground_discontinuity;
+    extractor_setting_.CONTINUED_NUMBER       = config.continued_number;
+
+    // Parameters for Road Model Estination
+    extractor_setting_.BEAM_SECTION_NUMBER    = config.beam_section_number;
+    extractor_setting_.ROAD_VIEW_RANGE        = config.road_view_range;
+
+    // Parameters for Curb Extraction
+    extractor_setting_.SMOOTH_WINDOW_SIZE     = config.smooth_window_size;
+    extractor_setting_.SMOOTH_THRESHOLD_GRASS = config.smooth_threshold_grass;
+    extractor_setting_.SMOOTH_THRESHOLD_PLANE = config.smooth_threshold_plane;
+
+    extractor_setting_.CURB_HEIGHT            = config.curb_height;
+    extractor_setting_.CURB_WINDOW_SIZE       = config.curb_window_size;
+    extractor_setting_.CURB_HEIGHT_THRESHOLD  = config.curb_height_threshold;
+    extractor_setting_.CURB_ANGLE_THRESHOLD   = config.curb_angle_threshold;
+    extractor_setting_.DISCONTINUITY          = config.discontinuity;
 }
 
 
@@ -176,28 +242,13 @@ void Driver::getClickedPointCallBack_(const
     point.y = msg->point.y;
     point.z = msg->point.z;
 
-    double elevation_angle;
-    double min_distance = 10000;
-    pcl::PointXYZI closest_point;
-    for (int i = 0; i < rings_.size(); ++i)
-    {
-        for (auto& p : rings_[i])
-        {
-            double distance = pcl::euclideanDistance(p, point);
-            if (distance < min_distance)
-            {
-                min_distance = distance;
-                closest_point = p;
-                elevation_angle = -lidar_setting_.elevation_angles[i] * M_PI/180;
-            }
-        }
-    }
-    double azimuth = std::atan2(closest_point.y, closest_point.x);
-    double xy_dist = std::sqrt(std::pow(closest_point.x, 2) +
-            std::pow(closest_point.y, 2));
+    std::cout << "\n Clicked Point : ("
+              << point.x << ", " << point.y << ", " << point.z << ")" << std::endl;
+
+    double azimuth = std::atan2(point.y, point.x);
+    double xy_dist = std::sqrt(std::pow(point.x, 2) + std::pow(point.y, 2));
     double delta_xy = xy_dist * extractor_setting_.ANGULAR_RESOLUTION;
-    std::cout << "Intesity: " << closest_point.intensity << std::endl;
-    std::cout <<  " azimuth: " << azimuth << std::endl;
-    std::cout << " xy_dist: " << xy_dist << " delta_xy: " << delta_xy << std::endl;
-    std::cout << "z: " << closest_point.z << " delta_z: " << delta_xy * std::sin(elevation_angle) << std::endl;
+    std::cout << "azimuth: " << azimuth << std::endl;
+    std::cout << "xy_dist: " << xy_dist << " delta_xy: " << delta_xy << std::endl;
+    std::cout << "height: " << feature_extractor_->calculateHeight(point) << std::endl;
 }

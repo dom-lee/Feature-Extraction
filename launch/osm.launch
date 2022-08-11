@@ -1,12 +1,14 @@
 <launch>
   <node name="feature_extraction" pkg="feature_extraction"
   type="feature_extraction_node" output="screen" required="true">  
-    <param name="velodyne_topic" value="/velodyne_points"/>
+    <param name="pointcloud_topic" value="/velodyne_points"/>
+    <param name="publisher_frame" value="velodyne"/>
     
     <!-- ==================== Publishing Parameters ======================= -->
     <param name="publishing_rate" value="10" /> <!-- Hz -->
 
     <!-- ==================== LiDAR Settings ============================== -->
+    <param name="lidar_height" value="1.4" />
     <param name="ring_number" value="32" />
     <rosparam param="elevation_angle">[-25.0, -15.639, -11.310, -8.843, -7.254,
     -6.148, -5.333, -4.667, -4.000, -3.667, -3.333, -3.000, -2.667, -2.333,
