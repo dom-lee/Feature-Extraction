@@ -10,11 +10,13 @@ project(feature_extraction)
 find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   roscpp
+  tf
   sensor_msgs
   std_msgs
   visualization_msgs
   dynamic_reconfigure
   PCL
+  pcl_ros
 )
 
 ## System dependencies are found with CMake's conventions
@@ -120,7 +122,7 @@ endif()
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES ${PROJECT_NAME}
-  CATKIN_DEPENDS geometry_msgs roscpp sensor_msgs std_msgs visualization_msgs
+  CATKIN_DEPENDS geometry_msgs roscpp tf sensor_msgs std_msgs visualization_msgs
   DEPENDS system_lib
 )
 

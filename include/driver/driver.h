@@ -13,9 +13,13 @@
 #include <iostream>
 #include <string>
 #include <array>
+#include <queue>
+#include <chrono>
 
 // ROS
 #include <ros/ros.h>
+#include <tf/transform_listener.h>
+#include <pcl_ros/impl/transforms.hpp>
 
 // Dynamic Configuration
 #include <dynamic_reconfigure/server.h>
@@ -25,6 +29,7 @@
 #include <pcl/point_cloud.h> // PointCloud
 #include <pcl/point_types.h> // PointXYZ
 #include <pcl_conversions/pcl_conversions.h> // fromROSMsg
+#include <pcl/registration/gicp.h>
 
 // Messgaes
 #include <sensor_msgs/PointCloud2.h>
@@ -53,6 +58,9 @@ private:
     // ROS
     ros::NodeHandle nh_;
 
+    // TF
+    tf::TransformListener tf_listener_;
+
     // Subscriber
     std::string pointcloud_topic_; 
 
@@ -65,10 +73,12 @@ private:
 
     ros::Publisher landmark_pub_;
     ros::Publisher ground_pub_;
+    ros::Publisher obstacles_pub_;
     ros::Publisher a_pub_;
     ros::Publisher b_pub_;
     ros::Publisher c_pub_;
     ros::Publisher beam_pub_;
+    ros::Publisher base_plane_pub_;
 
     // Paramters
     lidar_setting_t lidar_setting_;
@@ -79,17 +89,24 @@ private:
 
     // Point Clouds
     pcl::PointCloud<pcl::PointXYZ> raw_cloud_;
+    std::deque<pcl::PointCloud<pcl::PointXYZ>> cloud_odom_;
+    pcl::PointCloud<pcl::PointXYZ> accumulated_cloud_;
     std::array<pcl::PointCloud<pcl::PointXYZ>, VELODYNE_RING_NUMBER> rings_; 
     ros::Time cloud_msg_stamp_;
 
     void getCloudCallback_(const sensor_msgs::PointCloud2ConstPtr& cloud_msg);
 
+    template <class PointT>
     void publishPointCloud_(ros::Publisher& publisher, 
-                            const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud);
+                            const typename pcl::PointCloud<PointT>::Ptr cloud);
 
     void visualizeBeam_(ros::Publisher& publisher,
                         int id, std::string name,
                         std::vector<std::pair<double, double>> beam);
+
+    void visualizePlane_(ros::Publisher& publisher,
+                         int id, std::string name,
+                         Eigen::Vector4f plane_coeff);
 
     bool getParameters_();
 

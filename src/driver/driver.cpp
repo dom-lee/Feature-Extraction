@@ -36,12 +36,15 @@ Driver::Driver(ros::NodeHandle& nh)
             &Driver::getClickedPointCallBack_, this);
 
     // Publisher
-    landmark_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("landmark", 1);
-    ground_pub_   = nh_.advertise<sensor_msgs::PointCloud2>("ground", 1);
+    landmark_pub_  = nh_.advertise<sensor_msgs::PointCloud2>("landmark", 1);
+    ground_pub_    = nh_.advertise<sensor_msgs::PointCloud2>("ground", 1);
+    obstacles_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("obstacles", 1);
+
     a_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("a", 1);
     b_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("b", 1);
     c_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("c", 1);
     beam_pub_ = nh_.advertise<visualization_msgs::Marker>("beam", 1, true);
+    base_plane_pub_ = nh_.advertise<visualization_msgs::Marker>("base", 1, true);
 
     // Dynamic Reconfiguration
     dynamic_reconfigure::Server<feature_extraction::feature_extractionConfig> server;
@@ -55,6 +58,7 @@ Driver::Driver(ros::NodeHandle& nh)
     while (ros::ok())
     {
         ros::spinOnce(); 
+
         if (!rings_[0].empty())
         {
             ROS_INFO_ONCE("[Driver] Received Point Cloud");
@@ -67,14 +71,20 @@ Driver::Driver(ros::NodeHandle& nh)
             feature_extractor_->setInputCloud(rings_);
             feature_extractor_->run();
 
-            publishPointCloud_(ground_pub_, feature_extractor_->getGround());
-            publishPointCloud_(landmark_pub_, feature_extractor_->getLandmark());
+            publishPointCloud_<pcl::PointXYZ>(ground_pub_,
+                                              feature_extractor_->getGround());
+            publishPointCloud_<pcl::PointXYZ>(obstacles_pub_,
+                                              feature_extractor_->getObstacles());
+            publishPointCloud_<pcl::PointXYZ>(landmark_pub_,
+                                              feature_extractor_->getLandmark());
 
-            publishPointCloud_(a_pub_, feature_extractor_->getA());
-            publishPointCloud_(b_pub_, feature_extractor_->getB());
-            publishPointCloud_(c_pub_, feature_extractor_->getC());
-            visualizeBeam_(beam_pub_, 1, "lower beam",
-                           feature_extractor_->getBeamA());
+            publishPointCloud_<pcl::PointXYZ>(a_pub_, feature_extractor_->getA());
+            publishPointCloud_<pcl::PointXYZ>(b_pub_, feature_extractor_->getB());
+            publishPointCloud_<pcl::PointXYZ>(c_pub_, feature_extractor_->getC());
+            //visualizeBeam_(beam_pub_, 1, "lower beam",
+                           //feature_extractor_->getBeamA());
+            //visualizePlane_(base_plane_pub_, 1, "base",
+                            //feature_extractor_->getBasePlane());
         }
         else
         {
@@ -87,9 +97,11 @@ Driver::Driver(ros::NodeHandle& nh)
 void Driver::getCloudCallback_(const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 {
     debugger::debugColorTextOutput("[Driver] PointCloud Callback", 3, BC);
-    pcl::fromROSMsg(*cloud_msg, raw_cloud_);
-
-    // Save Time Stamp for TF
+   
+    // Convert sensor_msgs to pcl::PointCloud
+    pcl::PointCloud<pcl::PointXYZ> cloud;
+    pcl::fromROSMsg(*cloud_msg, cloud);
+    //// Save Time Stamp for TF
     cloud_msg_stamp_ = cloud_msg->header.stamp;
 
     // Update rings (array of pcl::PointCloud<pcl::PointXYZ)
@@ -102,15 +114,75 @@ void Driver::getCloudCallback_(const sensor_msgs::PointCloud2ConstPtr& cloud_msg
     sensor_msgs::PointCloud2ConstIterator<int> iter_ring(*cloud_msg, "ring");
     for (int i = 0; iter_ring != iter_ring.end(); ++iter_ring, ++i)
     {
-        rings_[*iter_ring].push_back(raw_cloud_[i]);
+        rings_[*iter_ring].push_back(cloud[i]);
     }
+    
+    //// Transform PointCloud from Velodyne Frame to Odom Frame
+    //tf_listener_.waitForTransform("odom", publisher_frame_,
+                                  //cloud_msg_stamp_, ros::Duration(1.0));
+    //pcl::PointCloud<pcl::PointXYZ> transformed_cloud;
+    //pcl_ros::transformPointCloud("odom", cloud, transformed_cloud, tf_listener_);
+
+    //// Generalized ICP
+    //if (cloud_odom_.empty())
+    //{
+        //cloud_odom_.push_back(std::move(transformed_cloud));
+    //}
+    //else
+    //{
+        //pcl::GeneralizedIterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> gicp;
+        //gicp.setMaxCorrespondenceDistance(5);
+        //gicp.setMaximumIterations(200);
+        //gicp.setMaximumOptimizerIterations(50);
+        //gicp.setRANSACIterations(0);
+        //gicp.setRANSACOutlierRejectionThreshold(0.05);
+        //gicp.setTransformationEpsilon(0.0005);
+        //gicp.setUseReciprocalCorrespondences(false);
+        
+        //gicp.setInputSource(transformed_cloud.makeShared());
+        //gicp.setInputTarget(cloud_odom_.back().makeShared());
+        
+        //std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+
+        //pcl::PointCloud<pcl::PointXYZ> aligned_source;
+        //aligned_source.header = transformed_cloud.header;
+        //gicp.align(aligned_source);
+        
+        //std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+        //std::cout << "Time difference = " << std::chrono::duration_cast<std::chrono::seconds> (end - begin).count() << "[s]" << std::endl;
+
+        //cloud_odom_.push_back(std::move(aligned_source));
+    //}
+    
+    //// Save PointCloud in Odom Frame into cloud_odom_(deque)
+    //if (cloud_odom_.size() > 10)
+    //{
+        //cloud_odom_.pop_front();
+    //}
+    //cloud_odom_.push_back(std::move(transformed_cloud));
+
+    
+    //// Re-Transform PointCloud from Odom Frame to Velodyne Frame
+    //accumulated_cloud_.clear();
+    //for (int i = 0; i < cloud_odom_.size(); ++i)
+    //{
+        //cloud_odom_[i].header.stamp = cloud.header.stamp; 
+        //pcl::PointCloud<pcl::PointXYZ> retransformed_cloud;
+        //pcl_ros::transformPointCloud(publisher_frame_, cloud_odom_[i],
+                                     //retransformed_cloud, tf_listener_);
+        //accumulated_cloud_ += retransformed_cloud;
+    //}
+    //accumulated_cloud_.header = cloud.header;
+
+
+    //publishPointCloud_<pcl::PointXYZ>(a_pub_, accumulated_cloud_.makeShared());
 }
 
+template <class PointT>
 void Driver::publishPointCloud_(ros::Publisher& publisher, 
-                                const pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud)
+                                const typename pcl::PointCloud<PointT>::Ptr cloud)
 {
     sensor_msgs::PointCloud2 msg;
-
     pcl::toROSMsg(*cloud, msg);
     msg.header.frame_id = publisher_frame_;
     msg.header.stamp = cloud_msg_stamp_;
@@ -148,8 +220,46 @@ void Driver::visualizeBeam_(ros::Publisher& publisher,
 
         line_list.points.push_back(p);
     }
-    
     publisher.publish(line_list);
+}
+
+void Driver::visualizePlane_(ros::Publisher& publisher,
+                             int id, std::string name,
+                             Eigen::Vector4f plane_coeff)
+{
+    visualization_msgs::Marker cube;
+
+    cube.id = id;
+    cube.ns = name;
+    cube.type = visualization_msgs::Marker::CUBE;
+    cube.header.frame_id = "velodyne";
+    cube.header.stamp = ros::Time::now();
+    cube.lifetime = ros::Duration();
+    cube.action = visualization_msgs::Marker::ADD;
+    
+    cube.pose.position.x = 0;
+    cube.pose.position.y = 0;
+    cube.pose.position.z = -plane_coeff(3) / plane_coeff(2);
+
+    Eigen::Vector3f basis;
+    basis << 0, 0, 1;
+    Eigen::Vector3f normal = plane_coeff.head(3);
+    normal.normalize();
+
+    Eigen::Vector3f cross_product = basis.cross(normal);
+    cube.pose.orientation.x = cross_product(0);
+    cube.pose.orientation.y = cross_product(1);
+    cube.pose.orientation.z = cross_product(2);
+    cube.pose.orientation.w = 1 + basis.dot(normal);
+
+    cube.scale.x = 10.0;
+    cube.scale.y = 10.0;
+    cube.scale.z = 0.1;
+
+    cube.color.b = 1.0f;
+    cube.color.a = 0.2;
+    
+    publisher.publish(cube);
 }
 
 bool Driver::getParameters_()
@@ -201,19 +311,39 @@ void Driver::reconfigParams_(feature_extraction::feature_extractionConfig& confi
     ROS_INFO_THROTTLE(1.0, "[Feature Extractor] new parameteres requested");
     is_extractor_setting_changed_ = true;
 
-    extractor_setting_.RING_TO_ANALYZE        = config.ring_to_analyze;
+    // Parameters for Base Planar Estimation
+    extractor_setting_.RING_TO_FIT_BASE       = config.ring_to_fit_base;
+    extractor_setting_.SMOOTH_WINDOW_SIZE     = config.smooth_window_size;
+    extractor_setting_.SMOOTH_THRESHOLD_PLANE = config.smooth_threshold_plane;
+
+    // Parameters for Plane RANSAC
     extractor_setting_.FIT_PLANE_THRESHOLD    = config.fit_plane_threshold;
+
+    // Parameters for Ground Extraction
+    extractor_setting_.GRID_NUMBER            = config.grid_number;
+    extractor_setting_.GRID_LENGTH            = config.grid_length;
+    extractor_setting_.GROUND_THRESHOLD       = config.ground_threshold;
+
+    extractor_setting_.DISCONTINUITY_AZIMUTH  = config.discontinuity_azimuth;
+    extractor_setting_.DISCONTINUITY_DISTANCE = config.discontinuity_distance;
+    extractor_setting_.DISCONTINUITY_HEIGHT   = config.discontinuity_height;
+
+    extractor_setting_.RING_TO_ANALYZE        = config.ring_to_analyze;
+    extractor_setting_.DISTANCE_TO_ANALYZE    = config.distance_to_analyze;
+    extractor_setting_.GRID_RESOLUTION        = config.grid_resolution;
+    extractor_setting_.OBSTACLE_THRESHOLD     = config.obstacle_threshold;
+    extractor_setting_.NOT_OBSTACLE_THRESHOLD = config.not_obstacle_threshold;
+
     extractor_setting_.ANGULAR_RESOLUTION     = config.angular_resolution;
     
     // Parameters for Obstacle Filter
-    extractor_setting_.RING_TO_FIT_BASE       = config.ring_to_fit_base;
     extractor_setting_.BASE_BUFFER            = config.base_buffer;
     extractor_setting_.ANGLE_BUFFER           = config.angle_buffer;
 
     // Parameters for Ground Estimation
     extractor_setting_.ANGLE_DIFF_THRESHOLD   = config.angle_diff_threshold;
     extractor_setting_.HEIGHT_DIFF_THRESHOLD  = config.height_diff_threshold;
-    extractor_setting_.GROUND_THRESHOLD       = config.ground_threshold;
+
     extractor_setting_.GROUND_DISCONTINUITY   = config.ground_discontinuity;
     extractor_setting_.CONTINUED_NUMBER       = config.continued_number;
 
@@ -222,9 +352,7 @@ void Driver::reconfigParams_(feature_extraction::feature_extractionConfig& confi
     extractor_setting_.ROAD_VIEW_RANGE        = config.road_view_range;
 
     // Parameters for Curb Extraction
-    extractor_setting_.SMOOTH_WINDOW_SIZE     = config.smooth_window_size;
     extractor_setting_.SMOOTH_THRESHOLD_GRASS = config.smooth_threshold_grass;
-    extractor_setting_.SMOOTH_THRESHOLD_PLANE = config.smooth_threshold_plane;
 
     extractor_setting_.CURB_HEIGHT            = config.curb_height;
     extractor_setting_.CURB_WINDOW_SIZE       = config.curb_window_size;
@@ -244,11 +372,29 @@ void Driver::getClickedPointCallBack_(const
 
     std::cout << "\n Clicked Point : ("
               << point.x << ", " << point.y << ", " << point.z << ")" << std::endl;
+    
+    int ring_id = -1;
+    double min_distance = INFINITY;
+    pcl::PointXYZ closest_point;
+    for (int i = 0; i < rings_.size(); ++i)
+    {
+        for (int j = 0; j < rings_[i].size(); ++j)
+        {
+            double distance = pcl::euclideanDistance(rings_[i][j], point);
+            if (distance < min_distance)
+            {
+                min_distance = distance;
+                closest_point = rings_[i][j];
+                ring_id = i;
+            }
+        }
+    }
+
 
     double azimuth = std::atan2(point.y, point.x);
     double xy_dist = std::sqrt(std::pow(point.x, 2) + std::pow(point.y, 2));
     double delta_xy = xy_dist * extractor_setting_.ANGULAR_RESOLUTION;
     std::cout << "azimuth: " << azimuth << std::endl;
     std::cout << "xy_dist: " << xy_dist << " delta_xy: " << delta_xy << std::endl;
-    std::cout << "height: " << feature_extractor_->calculateHeight(point) << std::endl;
+    std::cout << "Ring ID: " << ring_id << std::endl;
 }
