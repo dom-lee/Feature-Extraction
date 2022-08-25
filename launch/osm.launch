@@ -5,7 +5,7 @@
     <param name="publisher_frame" value="velodyne"/>
     
     <!-- ==================== Publishing Parameters ======================= -->
-    <param name="publishing_rate" value="5" /> <!-- Hz -->
+    <param name="publishing_rate" value="10" /> <!-- Hz -->
 
     <!-- ==================== LiDAR Settings ============================== -->
     <param name="lidar_height" value="1.4" />

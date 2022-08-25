@@ -64,8 +64,10 @@ public:
     pcl::PointCloud<pcl::PointXYZ>::Ptr getA();
     pcl::PointCloud<pcl::PointXYZ>::Ptr getB();
     pcl::PointCloud<pcl::PointXYZ>::Ptr getC();
-    std::shared_ptr<std::vector<std::vector<bool>>> getOccupancyGrid();
-    std::vector<std::pair<double, double>> getBeamA();
+
+    std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ>> getDownSampledLines();
+    std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ>> getBottomBeam();
+    std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ>> getTopBeam();
     Eigen::Vector4f getBasePlane();
 
     template <class PointT>
@@ -88,7 +90,10 @@ private:
     Eigen::Matrix4f transformation_;
     std::array<pcl::PointCloud<pcl::PointXYZ>, RING_NUMBER> transformed_rings_;
 
+    // Occupancy Grid
+    std::vector<std::vector<int>> grid_ground_;
 
+    std::vector<std::vector<std::pair<Eigen::Vector3f, Eigen::Vector3f>>> downsampled_lines_;
 
     std::array<std::vector<pcl::ModelCoefficients>, 8> multi_region_plane_coeff_;
 
@@ -99,19 +104,14 @@ private:
     
     // Beam Modeal
     // {azimuth, distance}
-    std::vector<std::pair<double, double>> max_distance_beam_;
-    std::vector<std::pair<double, double>> min_distance_beam_;
-    std::vector<std::pair<double, double>> free_beam_endpoints_;
+    std::vector<std::pair<double, double>> bottom_beam_;
+    std::vector<std::pair<double, double>> top_beam_;
     std::pair<double, double> intersection_;
-    std::vector<double> roads_angle_;
 
     // section_numer = ceil(RING_TO_ANALYZE / 2)
     int section_number_;
     std::array<std::pair<double, double>, 8> section_direction_;
     std::array<std::vector<double>, 8> section_distances_;
-
-    // Obstacle Occupancy Grid
-    std::vector<std::vector<bool>> occupancy_grid_;
 
     // x,y,z
     std::array<pcl::PointCloud<pcl::PointXYZ>, RING_NUMBER> ground_;
@@ -147,20 +147,27 @@ private:
 
     void extractCurb_();
 
-    template <class PointT>
-    void updateGrid_(std::array<pcl::PointCloud<PointT>, RING_NUMBER>& rings);
+    double processBeamModel_(double center_x, double center_y, 
+                             std::vector<std::pair<double, double>>& out_beam_model);
 
-    void processOccupancyForBeamModel_();
+
+    // Compute Distance from point in box to intersection
+    double calculateDistanceInBox_(double center_x, double center_y,
+                                   double theta, double box_length);
+    
+    // Compute Grid Indexes that approximately lie on the line.
+    // Brensenham's Line Algorithm
+    void executeBresenhamLine(
+        double start_x, double start_y, double end_x, double end_y,
+        double grid_length, std::vector<std::pair<int, int>>& out_grid_idxs);
 
     // Compute Angle[rad] between two plane model
-    double computeAngleTwoPlane_(
-            const pcl::ModelCoefficients& coeff1, 
-            const pcl::ModelCoefficients& coeff2);
+    double computeAngleTwoPlane_(const pcl::ModelCoefficients& coeff1, 
+                                 const pcl::ModelCoefficients& coeff2);
     
-    double computeHeightDiffTwoPlane_(
-        const std::pair<double, double> boundary_point,
-        const pcl::ModelCoefficients& coeff1, 
-        const pcl::ModelCoefficients& coeff2);
+    double computeHeightDiffTwoPlane_(const std::pair<double, double> boundary_point,
+                                      const pcl::ModelCoefficients& coeff1, 
+                                      const pcl::ModelCoefficients& coeff2);
 
     template <class PointT>
     void removeInliner_(pcl::PointCloud<PointT>& cloud,

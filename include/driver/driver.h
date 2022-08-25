@@ -74,10 +74,15 @@ private:
     ros::Publisher landmark_pub_;
     ros::Publisher ground_pub_;
     ros::Publisher obstacles_pub_;
+
     ros::Publisher a_pub_;
     ros::Publisher b_pub_;
     ros::Publisher c_pub_;
-    ros::Publisher beam_pub_;
+
+    ros::Publisher downsampled_lines_pub_;
+    ros::Publisher bottom_beam_pub_;
+    ros::Publisher top_beam_pub_;
+    ros::Publisher middle_beam_pub_;
     ros::Publisher base_plane_pub_;
 
     // Paramters
@@ -100,9 +105,11 @@ private:
     void publishPointCloud_(ros::Publisher& publisher, 
                             const typename pcl::PointCloud<PointT>::Ptr cloud);
 
-    void visualizeBeam_(ros::Publisher& publisher,
+    template <class PointT>
+    void visualizeLines_(ros::Publisher& publisher,
                         int id, std::string name,
-                        std::vector<std::pair<double, double>> beam);
+                        double r, double g, double b,
+                        std::vector<std::pair<PointT, PointT>> lines);
 
     void visualizePlane_(ros::Publisher& publisher,
                          int id, std::string name,

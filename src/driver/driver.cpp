@@ -40,10 +40,14 @@ Driver::Driver(ros::NodeHandle& nh)
     ground_pub_    = nh_.advertise<sensor_msgs::PointCloud2>("ground", 1);
     obstacles_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("obstacles", 1);
 
+    bottom_beam_pub_ = nh_.advertise<visualization_msgs::Marker>("bottom_beam", 1, true);
+    top_beam_pub_    = nh_.advertise<visualization_msgs::Marker>("top_beam", 1, true);
+
+    downsampled_lines_pub_ = nh_.advertise<visualization_msgs::Marker>("downsampled_lines", 1, true);
+
     a_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("a", 1);
     b_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("b", 1);
     c_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("c", 1);
-    beam_pub_ = nh_.advertise<visualization_msgs::Marker>("beam", 1, true);
     base_plane_pub_ = nh_.advertise<visualization_msgs::Marker>("base", 1, true);
 
     // Dynamic Reconfiguration
@@ -81,8 +85,13 @@ Driver::Driver(ros::NodeHandle& nh)
             publishPointCloud_<pcl::PointXYZ>(a_pub_, feature_extractor_->getA());
             publishPointCloud_<pcl::PointXYZ>(b_pub_, feature_extractor_->getB());
             publishPointCloud_<pcl::PointXYZ>(c_pub_, feature_extractor_->getC());
-            //visualizeBeam_(beam_pub_, 1, "lower beam",
-                           //feature_extractor_->getBeamA());
+
+            visualizeLines_(downsampled_lines_pub_, 1, "downsampled lines",
+                            1.0f, 0.0f, 1.0f, feature_extractor_->getDownSampledLines());
+            //visualizeLines_(bottom_beam_pub_, 1, "bottom beam", 1.0f, 0.0f, 1.0f,
+                           //feature_extractor_->getBottomBeam());
+            //visualizeLines_(top_beam_pub_, 1, "top beam", 0.0f, 1.0f, 1.0f,
+                           //feature_extractor_->getTopBeam());
             //visualizePlane_(base_plane_pub_, 1, "base",
                             //feature_extractor_->getBasePlane());
         }
@@ -190,9 +199,11 @@ void Driver::publishPointCloud_(ros::Publisher& publisher,
     publisher.publish(msg);
 }
 
-void Driver::visualizeBeam_(ros::Publisher& publisher,
+template <class PointT>
+void Driver::visualizeLines_(ros::Publisher& publisher,
                             int id, std::string name,
-                            std::vector<std::pair<double, double>> beam)
+                            double r, double g, double b,
+                            std::vector<std::pair<PointT, PointT>> lines)
 {
     visualization_msgs::Marker line_list;
 
@@ -205,20 +216,28 @@ void Driver::visualizeBeam_(ros::Publisher& publisher,
     line_list.action = visualization_msgs::Marker::ADD;
     line_list.pose.orientation.w = 1.0;
 
-    line_list.scale.x = 1;
-
-    line_list.color.g = 1.0f;
+    line_list.scale.x = 0.3;
+    
+    line_list.color.r = r;
+    line_list.color.g = g;
+    line_list.color.b = b;
     line_list.color.a = 0.5;
 
-    geometry_msgs::Point p;
+    geometry_msgs::Point p1;
+    geometry_msgs::Point p2;
 
-    for (const auto& point : beam)
+    for (const auto& line : lines)
     {
-        p.x = point.first;
-        p.y = point.second;
-        p.z = 0;
+        p1.x = line.first.x;
+        p1.y = line.first.y;
+        p1.z = line.first.z;
 
-        line_list.points.push_back(p);
+        p2.x = line.second.x;
+        p2.y = line.second.y;
+        p2.z = line.second.z;
+
+        line_list.points.push_back(p1);
+        line_list.points.push_back(p2);
     }
     publisher.publish(line_list);
 }
@@ -256,8 +275,10 @@ void Driver::visualizePlane_(ros::Publisher& publisher,
     cube.scale.y = 10.0;
     cube.scale.z = 0.1;
 
+    cube.color.r = 1.0f;
+    cube.color.g = 1.0f;
     cube.color.b = 1.0f;
-    cube.color.a = 0.2;
+    cube.color.a = 0.8;
     
     publisher.publish(cube);
 }
@@ -314,27 +335,48 @@ void Driver::reconfigParams_(feature_extraction::feature_extractionConfig& confi
     // Parameters for Base Planar Estimation
     extractor_setting_.RING_TO_FIT_BASE       = config.ring_to_fit_base;
     extractor_setting_.SMOOTH_WINDOW_SIZE     = config.smooth_window_size;
-    extractor_setting_.SMOOTH_THRESHOLD_PLANE = config.smooth_threshold_plane;
+    extractor_setting_.SMOOTH_THRESHOLD       = config.smooth_threshold;
 
     // Parameters for Plane RANSAC
     extractor_setting_.FIT_PLANE_THRESHOLD    = config.fit_plane_threshold;
 
     // Parameters for Ground Extraction
-    extractor_setting_.GRID_NUMBER            = config.grid_number;
     extractor_setting_.GRID_LENGTH            = config.grid_length;
+    extractor_setting_.GRID_RANGE             = config.grid_range;
+    extractor_setting_.DISCONTINUITY_HEIGHT   = config.discontinuity_height;
+    extractor_setting_.OBSTACLE_THRESHOLD     = config.obstacle_threshold;
     extractor_setting_.GROUND_THRESHOLD       = config.ground_threshold;
+    extractor_setting_.GRASS_COUNT_THRESHOLD  = config.grass_count_threshold;
+    extractor_setting_.GRASS_RATIO_THRESHOLD  = config.grass_ratio_threshold;
 
+    // Parameters for Road Model
+    extractor_setting_.BEAM_SECTION_NUMBER    = config.beam_section_number;
+    extractor_setting_.ROAD_VIEW_RANGE        = config.road_view_range;
+    extractor_setting_.ROAD_WIDTH_THRESHOLD   = config.road_width_threshold;
+    extractor_setting_.GROUND_COUNT_THRESHOLD = config.ground_count_threshold;
+
+    // Parameters for Curb Extraction
     extractor_setting_.DISCONTINUITY_AZIMUTH  = config.discontinuity_azimuth;
     extractor_setting_.DISCONTINUITY_DISTANCE = config.discontinuity_distance;
-    extractor_setting_.DISCONTINUITY_HEIGHT   = config.discontinuity_height;
+    extractor_setting_.ANGULAR_RESOLUTION     = config.angular_resolution;
+    extractor_setting_.DISCONTINUITY_RATIO    = config.discontinuity_ratio;
+    extractor_setting_.CONTINUITY_ANGLE       = config.continuity_angle;
+    extractor_setting_.CONTINUITY_DISTANCE    = config.continuity_distance;
+    extractor_setting_.SMOOTHNESS_THRESHOLD   = config.smoothness_threshold;
+    extractor_setting_.SMOOTH_COUNT           = config.smooth_count;
+    extractor_setting_.SMOOTH_DIST_THRESHOLD  = config.smooth_dist_threshold;
+    extractor_setting_.CURB_HEIGHT_THRESHOLD  = config.curb_height_threshold;
+    extractor_setting_.CURB_ANGLE_THRESHOLD   = config.curb_angle_threshold;
+    extractor_setting_.SIDEWALK_LENGTH        = config.sidewalk_length;
+
+
+
 
     extractor_setting_.RING_TO_ANALYZE        = config.ring_to_analyze;
     extractor_setting_.DISTANCE_TO_ANALYZE    = config.distance_to_analyze;
     extractor_setting_.GRID_RESOLUTION        = config.grid_resolution;
-    extractor_setting_.OBSTACLE_THRESHOLD     = config.obstacle_threshold;
     extractor_setting_.NOT_OBSTACLE_THRESHOLD = config.not_obstacle_threshold;
 
-    extractor_setting_.ANGULAR_RESOLUTION     = config.angular_resolution;
     
     // Parameters for Obstacle Filter
     extractor_setting_.BASE_BUFFER            = config.base_buffer;
@@ -348,16 +390,10 @@ void Driver::reconfigParams_(feature_extraction::feature_extractionConfig& confi
     extractor_setting_.CONTINUED_NUMBER       = config.continued_number;
 
     // Parameters for Road Model Estination
-    extractor_setting_.BEAM_SECTION_NUMBER    = config.beam_section_number;
-    extractor_setting_.ROAD_VIEW_RANGE        = config.road_view_range;
 
-    // Parameters for Curb Extraction
-    extractor_setting_.SMOOTH_THRESHOLD_GRASS = config.smooth_threshold_grass;
 
     extractor_setting_.CURB_HEIGHT            = config.curb_height;
     extractor_setting_.CURB_WINDOW_SIZE       = config.curb_window_size;
-    extractor_setting_.CURB_HEIGHT_THRESHOLD  = config.curb_height_threshold;
-    extractor_setting_.CURB_ANGLE_THRESHOLD   = config.curb_angle_threshold;
     extractor_setting_.DISCONTINUITY          = config.discontinuity;
 }
 
@@ -372,6 +408,11 @@ void Driver::getClickedPointCallBack_(const
 
     std::cout << "\n Clicked Point : ("
               << point.x << ", " << point.y << ", " << point.z << ")" << std::endl;
+
+    pcl::PointXYZ origin(0, 0, 0);
+    std::cout << "Distance : " << pcl::euclideanDistance(origin, point) << std::endl;
+    double azimuth = std::atan2(point.y, point.x);
+    std::cout << "Azimuth :  " << std::atan2(point.y, point.x) << std::endl;  
     
     int ring_id = -1;
     double min_distance = INFINITY;
@@ -391,10 +432,9 @@ void Driver::getClickedPointCallBack_(const
     }
 
 
-    double azimuth = std::atan2(point.y, point.x);
     double xy_dist = std::sqrt(std::pow(point.x, 2) + std::pow(point.y, 2));
     double delta_xy = xy_dist * extractor_setting_.ANGULAR_RESOLUTION;
-    std::cout << "azimuth: " << azimuth << std::endl;
     std::cout << "xy_dist: " << xy_dist << " delta_xy: " << delta_xy << std::endl;
     std::cout << "Ring ID: " << ring_id << std::endl;
+    sleep(2);
 }
