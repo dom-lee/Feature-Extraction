@@ -55,7 +55,7 @@ Driver::Driver(ros::NodeHandle& nh)
     server.setCallback(boost::bind(&Driver::reconfigParams_, this, _1, _2));
 
     // Construct Feature Extractor
-    feature_extractor_ = std::make_unique<FeatureExtractor>(lidar_setting_);
+    FeatureExtractor feature_extractor(lidar_setting_);
 
     // Run Feature Dectector
     ros::Rate r(publishing_rate_);
@@ -68,32 +68,32 @@ Driver::Driver(ros::NodeHandle& nh)
             ROS_INFO_ONCE("[Driver] Received Point Cloud");
             if (is_extractor_setting_changed_)
             {
-                feature_extractor_->changeSetting(extractor_setting_);
+                feature_extractor.changeSetting(extractor_setting_);
                 is_extractor_setting_changed_ = false;
             }
 
-            feature_extractor_->setInputCloud(rings_);
-            feature_extractor_->run();
+            feature_extractor.setInputCloud(rings_);
+            feature_extractor.run();
 
             publishPointCloud_<pcl::PointXYZ>(ground_pub_,
-                                              feature_extractor_->getGround());
+                                              feature_extractor.getGround());
             publishPointCloud_<pcl::PointXYZ>(obstacles_pub_,
-                                              feature_extractor_->getObstacles());
+                                              feature_extractor.getObstacles());
             publishPointCloud_<pcl::PointXYZ>(landmark_pub_,
-                                              feature_extractor_->getLandmark());
+                                              feature_extractor.getLandmark());
 
-            publishPointCloud_<pcl::PointXYZ>(a_pub_, feature_extractor_->getA());
-            publishPointCloud_<pcl::PointXYZ>(b_pub_, feature_extractor_->getB());
-            publishPointCloud_<pcl::PointXYZ>(c_pub_, feature_extractor_->getC());
+            publishPointCloud_<pcl::PointXYZ>(a_pub_, feature_extractor.getA());
+            publishPointCloud_<pcl::PointXYZ>(b_pub_, feature_extractor.getB());
+            publishPointCloud_<pcl::PointXYZ>(c_pub_, feature_extractor.getC());
 
             visualizeLines_(downsampled_lines_pub_, 1, "downsampled lines",
-                            1.0f, 0.0f, 1.0f, feature_extractor_->getDownSampledLines());
+                            1.0f, 0.0f, 1.0f, feature_extractor.getDownSampledLines());
             //visualizeLines_(bottom_beam_pub_, 1, "bottom beam", 1.0f, 0.0f, 1.0f,
-                           //feature_extractor_->getBottomBeam());
+                           //feature_extractor.getBottomBeam());
             //visualizeLines_(top_beam_pub_, 1, "top beam", 0.0f, 1.0f, 1.0f,
-                           //feature_extractor_->getTopBeam());
+                           //feature_extractor.getTopBeam());
             //visualizePlane_(base_plane_pub_, 1, "base",
-                            //feature_extractor_->getBasePlane());
+                            //feature_extractor.getBasePlane());
         }
         else
         {

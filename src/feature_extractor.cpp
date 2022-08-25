@@ -633,13 +633,6 @@ void FeatureExtractor::extractCurb_()
             pcl::PointXYZ start_point(start_curr(0), start_curr(1), start_curr(2));
             pcl::PointXYZ end_point(end_curr(0), end_curr(1), end_curr(2));
 
-            // Sidewalk Width Threshold
-            double length_curr_line = (start_curr - end_curr).norm();
-            if (length_curr_line < setting_.SIDEWALK_LENGTH)
-            {
-                continue;
-            }
-
             // Adjacent Downsampled lines
             Eigen::Vector3f& start_next = downsampled_lines_[i][k + 1].first;
             Eigen::Vector3f& end_next   = downsampled_lines_[i][k + 1].second;
@@ -648,7 +641,7 @@ void FeatureExtractor::extractCurb_()
 
             // Vector for using angular threshold
             Eigen::Vector2f v_a, v_b, v_c;
-            double angle_road_curb, angle_sidewalk_curb;
+            double angle_road_curb;
 
             // Discontinued Curb
             // Left: Sidewalk | Right: Road
@@ -660,7 +653,8 @@ void FeatureExtractor::extractCurb_()
             if (azimuth_diff_prev < setting_.DISCONTINUITY_AZIMUTH &&
                 start_curr(2) - end_prev(2) > setting_.CURB_HEIGHT_THRESHOLD &&
                 angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
-                end_prev.norm() > start_curr.norm())
+                end_prev.norm() > start_curr.norm() &&
+                (start_curr - end_prev).norm() < setting_.DISCONTINUITY_DISTANCE)
             {
                 transformed_landmark.push_back(start_point);
                 a_test_.push_back(start_point);
@@ -677,7 +671,8 @@ void FeatureExtractor::extractCurb_()
             if (azimuth_diff_next < setting_.DISCONTINUITY_AZIMUTH &&
                 end_curr(2) - start_next(2) > setting_.CURB_HEIGHT_THRESHOLD &&
                 angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
-                start_next.norm() > end_curr.norm())
+                start_next.norm() > end_curr.norm() &&
+                (end_curr - start_next).norm() < setting_.DISCONTINUITY_DISTANCE)
             {
                 transformed_landmark.push_back(end_point);
                 b_test_.push_back(end_point);
@@ -688,21 +683,19 @@ void FeatureExtractor::extractCurb_()
             // Left: Sidewalk | Center: Curb | Right: Road
             v_a = (start_prev - end_prev).head(2); // Road
             v_b = (end_curr - start_curr).head(2); // Curb
-            v_c = (start_next - end_next).head(2);  // Sidewalk
             angle_road_curb = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
-            angle_sidewalk_curb = std::acos(v_c.dot(v_b) / v_c.norm() / v_b.norm());
             if (azimuth_diff_prev < setting_.DISCONTINUITY_AZIMUTH &&
                 azimuth_diff_next < setting_.DISCONTINUITY_DISTANCE &&
                 end_curr(2) - start_curr(2) > setting_.CURB_HEIGHT_THRESHOLD &&
+                end_curr(2) - end_prev(2) > setting_.CURB_HEIGHT_THRESHOLD &&
                 angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
-                angle_sidewalk_curb < setting_.CONTINUITY_ANGLE &&
                 start_curr.norm() > end_curr.norm() &&
                 (start_curr - end_prev).norm() < setting_.DISCONTINUITY_DISTANCE &&
                 (end_curr - start_next).norm() < setting_.DISCONTINUITY_DISTANCE &&
                 (start_next - end_next).norm() > setting_.SIDEWALK_LENGTH)
             {
-                transformed_landmark.push_back(end_point);
-                c_test_.push_back(end_point);
+                transformed_landmark.push_back(start_point);
+                c_test_.push_back(start_point);
                 continue;
             }
 
@@ -710,20 +703,18 @@ void FeatureExtractor::extractCurb_()
             // Left: Road | Center: Curb | Right: Sidewalk
             v_a = (end_next - start_next).head(2); // Road
             v_b = (start_curr - end_curr).head(2); // Curb
-            v_c = (end_prev - start_prev).head(2); // Sidewalk
             angle_road_curb = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
-            angle_sidewalk_curb = std::acos(v_c.dot(v_b) / v_c.norm() / v_b.norm());
             if (azimuth_diff_next < setting_.DISCONTINUITY_AZIMUTH &&
                 azimuth_diff_prev < setting_.DISCONTINUITY_AZIMUTH &&
                 start_curr(2) - end_curr(2) > setting_.CURB_HEIGHT_THRESHOLD &&
+                start_curr(2) - start_next(2) > setting_.CURB_HEIGHT_THRESHOLD &&
                 angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
-                angle_sidewalk_curb < setting_.CONTINUITY_ANGLE &&
                 end_curr.norm() > start_curr.norm() &&
                 (end_curr - start_next).norm() < setting_.DISCONTINUITY_DISTANCE &&
                 (start_curr - end_prev).norm() < setting_.DISCONTINUITY_DISTANCE &&
                 (end_prev - start_prev).norm() > setting_.SIDEWALK_LENGTH)
             {
-                transformed_landmark.push_back(start_point);
+                transformed_landmark.push_back(end_point);
                 continue;
             }
         }

@@ -90,8 +90,6 @@ private:
     feature_extractor_setting_t extractor_setting_;
     bool is_extractor_setting_changed_;
 
-    std::unique_ptr<FeatureExtractor> feature_extractor_;
-
     // Point Clouds
     pcl::PointCloud<pcl::PointXYZ> raw_cloud_;
     std::deque<pcl::PointCloud<pcl::PointXYZ>> cloud_odom_;
