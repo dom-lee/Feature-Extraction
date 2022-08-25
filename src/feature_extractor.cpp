@@ -17,11 +17,6 @@ FeatureExtractor::FeatureExtractor(lidar_setting_t lidar_setting)
     estimated_lidar_height_ = lidar_setting.height;
     origin_ = pcl::PointXYZ(0, 0, 0);
 
-    // Segmentation Option
-    section_direction_ = {{ 
-        {-1, 0}, {-0.7071, -0.7071}, {0, -1}, {0.7071, -0.7071},
-        {1, 0}, {0.7071, 0.7071}, {0, 1}, {-0.7071, 0.7071} }};
-   
     base_plane_updated_ = false;
 
     debugger::debugTitleTextOutput("[Feature Extractor]", "Constructed", 10, BC);
@@ -171,11 +166,7 @@ std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ>> FeatureExtractor::getTopBea
 
 Eigen::Vector4f FeatureExtractor::getBasePlane()
 {
-    Eigen::Vector4f base_coeff;
-    base_coeff << base_coeff_.values[0], base_coeff_.values[1],
-                  base_coeff_.values[2], base_coeff_.values[3];
-
-    return base_coeff;
+    return base_coeff_;
 }
 
 template <class PointT>
@@ -242,7 +233,7 @@ bool FeatureExtractor::estimateBasePlane_(
     debugger::debugColorOutput("Base Coefficients \n", tmp_base_coeff, 3, BG); 
 
     // Sanity Check for Vertical Base Planar
-    if (tmp_base_coeff.values[2] < 0.8)
+    if (tmp_base_coeff(2) < 0.8)
     {
         PCL_ERROR("Base Planar Model is Vertical! \n");
         base_plane_updated_ = false;
@@ -252,13 +243,6 @@ bool FeatureExtractor::estimateBasePlane_(
     base_plane_updated_ = true;
     base_coeff_ = tmp_base_coeff;
 
-    double a = base_coeff_.values[0];
-    double b = base_coeff_.values[1];
-    double c = base_coeff_.values[2];
-    double d = base_coeff_.values[3];
-
-    base_coeff_vec_ << a, b, c, d;
-
     // Calculated Transformation Matrix
     // Rotation Matrix
     // Row-Wise Normalized 
@@ -266,13 +250,15 @@ bool FeatureExtractor::estimateBasePlane_(
     // | 0  c -b |
     // | a  b  c | 
     transformation_ = Eigen::Matrix4f::Identity(4, 4);
-    transformation_.block<3, 3>(0, 0) << c, 0, -a, 0, c, -b, a, b, c;
+    transformation_.block<3, 3>(0, 0) << base_coeff_(2), 0, -base_coeff_(0),
+                                         0, base_coeff_(2), -base_coeff_(1),
+                                         base_coeff_(0), base_coeff_(1), base_coeff_(2);
     transformation_.rowwise().normalize();
 
     debugger::debugColorOutput("Transformation \n", transformation_, 3, BB); 
     
     // Estimated LiDAR Height from ground : |d| 
-    estimated_lidar_height_ = std::abs(base_coeff_.values[3]);
+    estimated_lidar_height_ = std::abs(base_coeff_(3));
     debugger::debugColorOutput("Estimated LiDAR Height : ",
                                estimated_lidar_height_, 5, BW); 
 
@@ -280,12 +266,13 @@ bool FeatureExtractor::estimateBasePlane_(
 }
 
 template <class PointT>
-pcl::ModelCoefficients FeatureExtractor::estimatePlaneRANSAC_(
+Eigen::Vector4f FeatureExtractor::estimatePlaneRANSAC_(
     pcl::PointCloud<PointT>& cloud)
 {
+    Eigen::Vector4f plane_coeff;
     // Plane Model segmentation with RANSAC
     // https://pcl.readthedocs.io/en/latest/planar_segmentation.html
-    pcl::ModelCoefficients plane_coeff; 
+    pcl::ModelCoefficients plane_model_coeff; 
     if (cloud.size() < 10)
     {
         debugger::debugColorTextOutput("Not enough Data for RANSAC", 5, BY);
@@ -305,12 +292,15 @@ pcl::ModelCoefficients FeatureExtractor::estimatePlaneRANSAC_(
     
     // Segment Planar Model
     seg.setInputCloud(cloud.makeShared());
-    seg.segment(inliers, plane_coeff);
+    seg.segment(inliers, plane_model_coeff);
 
     if (inliers.indices.empty())
     {
         PCL_ERROR("Could not estimate a planar model for the given dataset.\n");
     }
+
+    plane_coeff << plane_model_coeff.values[0], plane_model_coeff.values[1],
+                   plane_model_coeff.values[2], plane_model_coeff.values[3];
 
     return plane_coeff;
 }
@@ -338,10 +328,6 @@ void FeatureExtractor::extractGround_()
         std::vector<double>(grid_size, INFINITY));
     std::vector<std::vector<double>> grid_max_z(grid_size,
         std::vector<double>(grid_size, -INFINITY));
-
-    // count of Grass Point for grid
-    std::vector<std::vector<int>> grid_grass_count(grid_size,
-        std::vector<int>(grid_size, 0));
 
     // Transformed PointCloud in Grid
     std::vector<std::vector<pcl::PointCloud<pcl::PointXYZL>>> grid_cloud(grid_size,
@@ -396,23 +382,11 @@ void FeatureExtractor::extractGround_()
             {
                 continue;
             }
-
-            pcl::PointXYZ& point_prev = transformed_rings_[i][(j - 1 + ring_size) % ring_size];
-            pcl::PointXYZ& point_next = transformed_rings_[i][(j + 1) % ring_size];
-            double dist_diff_ones = pcl::euclideanDistance(point_prev, point) + 
-                                    pcl::euclideanDistance(point, point_next);
-            double dist_diff_two  = pcl::euclideanDistance(point_prev, point_next);
-            double smoothness_coeff = dist_diff_two / dist_diff_ones;
-            if(smoothness_coeff < setting_.SMOOTH_THRESHOLD)
-            {
-                grid_grass_count[m][n]++;
-            }
-
         }
     } // End of Pre-Compute Grid
 
     // Estimate whether Cell is Ground or Not
-    // -1 : Obstacle (Building, Vehicle, Grass)
+    // -1 : Obstacle (Building, Vehicle)
     //  0 : Unknown
     //  1 : Ground
     grid_ground_ = std::vector<std::vector<int>>(grid_size,
@@ -422,7 +396,7 @@ void FeatureExtractor::extractGround_()
 
     // Asign Center of Grid as Ground
     grid_ground_[center_m][center_n] = 1;
-    Eigen::Vector4f transformed_base_coeff = transformation_ * base_coeff_vec_;
+    Eigen::Vector4f transformed_base_coeff = transformation_ * base_coeff_;
     grid_min_z[center_m][center_n] = -transformed_base_coeff(3);
     grid_max_z[center_m][center_n] = -transformed_base_coeff(3);
 
@@ -464,11 +438,7 @@ void FeatureExtractor::extractGround_()
             // Check whether grid is ground based on neighbor ground
             double max_z_neighbor_ground = -INFINITY;
             double min_z_neighbor_ground = INFINITY;
-            int neighbor_count = 0;
-            int empty_neighbor_count = 0;
-            // Count neighbors Grass Point
-            int grass_points_count = grid_grass_count[m][n];
-            int total_neighbor_count = grid_cloud[m][n].size();
+
             for (auto& neighbor : neighbors)
             {
                 int tmp_m = m + neighbor.first;
@@ -480,10 +450,6 @@ void FeatureExtractor::extractGround_()
                 {
                     continue;
                 }
-
-                // Grass Neighbor
-                grass_points_count += grid_grass_count[tmp_m][tmp_n];
-                total_neighbor_count += grid_cloud[tmp_m][tmp_n].size();
 
                 // Update Min/Max Z value for neighbor ground
                 // Only Consider Inner grid
@@ -521,20 +487,10 @@ void FeatureExtractor::extractGround_()
                 grid_min_z[m][n] < min_z_neighbor_ground - 3 * setting_.GROUND_THRESHOLD)
             {
                 grid_ground_[m][n] = -1;
-                grid_grass_count[m][n] = 0;
 
                 // Reset Min/Max Z value for obstacle for ground propagation
                 grid_max_z[m][n] = max_z_neighbor_ground;
                 grid_min_z[m][n] = min_z_neighbor_ground;
-
-                continue;
-            }
-
-            // Set Cell as Grass
-            if (grass_points_count > setting_.GRASS_COUNT_THRESHOLD &&
-                grass_points_count > setting_.GRASS_RATIO_THRESHOLD * total_neighbor_count)
-            {
-                grid_ground_[m][n] = -1;
 
                 continue;
             }
@@ -544,7 +500,7 @@ void FeatureExtractor::extractGround_()
         }
     }
 
-    // Save Ground and Obstacles after smoothing
+    // Save Ground and Obstacles
     for (int m = 0; m < grid_size; ++m)
     {
         for (int n = 0; n < grid_size; ++n)
@@ -584,58 +540,6 @@ void FeatureExtractor::extractGround_()
                 return std::atan2(lhs.y, lhs.x) < std::atan2(rhs.y, rhs.x);
             }
         );
-    }
-}
-
-void FeatureExtractor::estimateRoadModel_()
-{
-    bottom_beam_.clear();
-    top_beam_.clear();
-
-    // Bottom Layer Beam Model (emit beam based on LiDAR Origin)
-    double max_score = processBeamModel_(0, 0, bottom_beam_);
-
-    // Top Layer Beam Model
-    for (auto& beam : bottom_beam_)
-    {
-        for (int i = 0; i < 30; ++i)
-        {
-            double theta = std::atan2(beam.second, beam.first);
-            double x = (i + 1) * std::cos(theta);
-            double y = (i + 1) * std::sin(theta);
-
-            std::vector<std::pair<double, double>> new_beam;
-            double score = processBeamModel_(x, y, new_beam);
-            
-            if (score > max_score)
-            {
-                max_score = score;
-                intersection_ = {x, y};
-                top_beam_ = new_beam;
-            }
-        }
-    }
-
-    std::pair<double, double> intersection = intersection_;
-    std::vector<std::pair<double, double>> top_beam = top_beam_;
-    for (auto& beam : top_beam)
-    {
-        for (int i = 0; i < 5; ++i)
-        {
-            double theta = std::atan2(beam.second - intersection.second,
-                                      beam.first  - intersection.first);
-            double x = intersection.first  + (i + 1) * std::cos(theta);
-            double y = intersection.second + (i + 1) * std::sin(theta);
-
-            std::vector<std::pair<double, double>> new_beam;
-            double score = processBeamModel_(x, y, new_beam);
-            if (score > max_score)
-            {
-                max_score = score;
-                intersection_ = {x, y};
-                top_beam_ = new_beam;
-            }
-        }
     }
 }
 
@@ -759,6 +663,7 @@ void FeatureExtractor::extractCurb_()
                 end_prev.norm() > start_curr.norm())
             {
                 transformed_landmark.push_back(start_point);
+                a_test_.push_back(start_point);
                 continue;
             }
             
@@ -775,6 +680,7 @@ void FeatureExtractor::extractCurb_()
                 start_next.norm() > end_curr.norm())
             {
                 transformed_landmark.push_back(end_point);
+                b_test_.push_back(end_point);
                 continue;
             }
            
@@ -796,6 +702,7 @@ void FeatureExtractor::extractCurb_()
                 (start_next - end_next).norm() > setting_.SIDEWALK_LENGTH)
             {
                 transformed_landmark.push_back(end_point);
+                c_test_.push_back(end_point);
                 continue;
             }
 
@@ -827,6 +734,57 @@ void FeatureExtractor::extractCurb_()
     pcl::transformPointCloud(transformed_landmark, landmark_, transformation_.transpose());
 }
 
+void FeatureExtractor::estimateRoadModel_()
+{
+    bottom_beam_.clear();
+    top_beam_.clear();
+
+    // Bottom Layer Beam Model (emit beam based on LiDAR Origin)
+    double max_score = processBeamModel_(0, 0, bottom_beam_);
+
+    // Top Layer Beam Model
+    for (auto& beam : bottom_beam_)
+    {
+        for (int i = 0; i < 30; ++i)
+        {
+            double theta = std::atan2(beam.second, beam.first);
+            double x = (i + 1) * std::cos(theta);
+            double y = (i + 1) * std::sin(theta);
+
+            std::vector<std::pair<double, double>> new_beam;
+            double score = processBeamModel_(x, y, new_beam);
+            
+            if (score > max_score)
+            {
+                max_score = score;
+                intersection_ = {x, y};
+                top_beam_ = new_beam;
+            }
+        }
+    }
+
+    std::pair<double, double> intersection = intersection_;
+    std::vector<std::pair<double, double>> top_beam = top_beam_;
+    for (auto& beam : top_beam)
+    {
+        for (int i = 0; i < 5; ++i)
+        {
+            double theta = std::atan2(beam.second - intersection.second,
+                                      beam.first  - intersection.first);
+            double x = intersection.first  + (i + 1) * std::cos(theta);
+            double y = intersection.second + (i + 1) * std::sin(theta);
+
+            std::vector<std::pair<double, double>> new_beam;
+            double score = processBeamModel_(x, y, new_beam);
+            if (score > max_score)
+            {
+                max_score = score;
+                intersection_ = {x, y};
+                top_beam_ = new_beam;
+            }
+        }
+    }
+}
 
 double FeatureExtractor::processBeamModel_(double center_x, double center_y,
     std::vector<std::pair<double, double>>& out_beam_model)
@@ -1067,65 +1025,4 @@ void FeatureExtractor::executeBresenhamLine(
             y0 += sy;
         }
     }
-}
-
-double FeatureExtractor::computeAngleTwoPlane_(
-    const pcl::ModelCoefficients& coeff1, 
-    const pcl::ModelCoefficients& coeff2)
-{
-    double a1 = coeff1.values[0];
-    double b1 = coeff1.values[1];
-    double c1 = coeff1.values[2];
-
-    double a2 = coeff2.values[0];
-    double b2 = coeff2.values[1];
-    double c2 = coeff2.values[2];
-
-    double angle = std::acos(a1 * a2 + b1 * b2 + c1 * c2);
-
-    return angle;
-}
-
-double FeatureExtractor::computeHeightDiffTwoPlane_(
-    const std::pair<double, double> boundary_point,
-    const pcl::ModelCoefficients& coeff1, 
-    const pcl::ModelCoefficients& coeff2)
-{
-    double a1 = coeff1.values[0];
-    double b1 = coeff1.values[1];
-    double d1 = coeff1.values[3];
-
-    double a2 = coeff2.values[0];
-    double b2 = coeff2.values[1];
-    double d2 = coeff2.values[3];
-
-    double x = boundary_point.first;
-    double y = boundary_point.second;
-
-    double dist1 = std::abs(a1 * x + b1 * y + d1);
-    double dist2 = std::abs(a2 * x + b2 * y + d2); 
-
-    return std::abs(dist1 - dist2);
-}
-
-template <class PointT>
-void FeatureExtractor::removeInliner_(pcl::PointCloud<PointT>& cloud, 
-                                      pcl::ModelCoefficients& coeff)
-{
-    Eigen::Vector4f plane_coeff = Eigen::Vector4f::Map(coeff.values.data(), 4);
-
-    pcl::PointIndices::Ptr inliers(new pcl::PointIndices());
-    pcl::ExtractIndices<PointT> extract;
-    for (int i = 0; i < cloud.size(); ++i)
-    {
-        double distance = pcl::pointToPlaneDistance(cloud.points[i], plane_coeff);
-        if (distance < setting_.FIT_PLANE_THRESHOLD)
-        {
-            inliers->indices.push_back(i);
-        }
-    }
-    extract.setInputCloud(cloud.makeShared());
-    extract.setIndices(inliers);
-    extract.setNegative(true);
-    extract.filter(cloud);
 }

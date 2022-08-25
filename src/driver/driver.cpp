@@ -346,8 +346,16 @@ void Driver::reconfigParams_(feature_extraction::feature_extractionConfig& confi
     extractor_setting_.DISCONTINUITY_HEIGHT   = config.discontinuity_height;
     extractor_setting_.OBSTACLE_THRESHOLD     = config.obstacle_threshold;
     extractor_setting_.GROUND_THRESHOLD       = config.ground_threshold;
-    extractor_setting_.GRASS_COUNT_THRESHOLD  = config.grass_count_threshold;
-    extractor_setting_.GRASS_RATIO_THRESHOLD  = config.grass_ratio_threshold;
+
+    // Parameters for Curb Extraction
+    extractor_setting_.DISCONTINUITY_AZIMUTH  = config.discontinuity_azimuth;
+    extractor_setting_.DISCONTINUITY_DISTANCE = config.discontinuity_distance;
+    extractor_setting_.SMOOTHNESS_THRESHOLD   = config.smoothness_threshold;
+    extractor_setting_.SMOOTH_COUNT           = config.smooth_count;
+    extractor_setting_.CONTINUITY_ANGLE       = config.continuity_angle;
+    extractor_setting_.CURB_HEIGHT_THRESHOLD  = config.curb_height_threshold;
+    extractor_setting_.CURB_ANGLE_THRESHOLD   = config.curb_angle_threshold;
+    extractor_setting_.SIDEWALK_LENGTH        = config.sidewalk_length;
 
     // Parameters for Road Model
     extractor_setting_.BEAM_SECTION_NUMBER    = config.beam_section_number;
@@ -355,46 +363,8 @@ void Driver::reconfigParams_(feature_extraction::feature_extractionConfig& confi
     extractor_setting_.ROAD_WIDTH_THRESHOLD   = config.road_width_threshold;
     extractor_setting_.GROUND_COUNT_THRESHOLD = config.ground_count_threshold;
 
-    // Parameters for Curb Extraction
-    extractor_setting_.DISCONTINUITY_AZIMUTH  = config.discontinuity_azimuth;
-    extractor_setting_.DISCONTINUITY_DISTANCE = config.discontinuity_distance;
-    extractor_setting_.ANGULAR_RESOLUTION     = config.angular_resolution;
-    extractor_setting_.DISCONTINUITY_RATIO    = config.discontinuity_ratio;
-    extractor_setting_.CONTINUITY_ANGLE       = config.continuity_angle;
-    extractor_setting_.CONTINUITY_DISTANCE    = config.continuity_distance;
-    extractor_setting_.SMOOTHNESS_THRESHOLD   = config.smoothness_threshold;
-    extractor_setting_.SMOOTH_COUNT           = config.smooth_count;
-    extractor_setting_.SMOOTH_DIST_THRESHOLD  = config.smooth_dist_threshold;
-    extractor_setting_.CURB_HEIGHT_THRESHOLD  = config.curb_height_threshold;
-    extractor_setting_.CURB_ANGLE_THRESHOLD   = config.curb_angle_threshold;
-    extractor_setting_.SIDEWALK_LENGTH        = config.sidewalk_length;
-
-
-
-
+    // Parameters for Debug
     extractor_setting_.RING_TO_ANALYZE        = config.ring_to_analyze;
-    extractor_setting_.DISTANCE_TO_ANALYZE    = config.distance_to_analyze;
-    extractor_setting_.GRID_RESOLUTION        = config.grid_resolution;
-    extractor_setting_.NOT_OBSTACLE_THRESHOLD = config.not_obstacle_threshold;
-
-    
-    // Parameters for Obstacle Filter
-    extractor_setting_.BASE_BUFFER            = config.base_buffer;
-    extractor_setting_.ANGLE_BUFFER           = config.angle_buffer;
-
-    // Parameters for Ground Estimation
-    extractor_setting_.ANGLE_DIFF_THRESHOLD   = config.angle_diff_threshold;
-    extractor_setting_.HEIGHT_DIFF_THRESHOLD  = config.height_diff_threshold;
-
-    extractor_setting_.GROUND_DISCONTINUITY   = config.ground_discontinuity;
-    extractor_setting_.CONTINUED_NUMBER       = config.continued_number;
-
-    // Parameters for Road Model Estination
-
-
-    extractor_setting_.CURB_HEIGHT            = config.curb_height;
-    extractor_setting_.CURB_WINDOW_SIZE       = config.curb_window_size;
-    extractor_setting_.DISCONTINUITY          = config.discontinuity;
 }
 
 
@@ -431,10 +401,6 @@ void Driver::getClickedPointCallBack_(const
         }
     }
 
-
-    double xy_dist = std::sqrt(std::pow(point.x, 2) + std::pow(point.y, 2));
-    double delta_xy = xy_dist * extractor_setting_.ANGULAR_RESOLUTION;
-    std::cout << "xy_dist: " << xy_dist << " delta_xy: " << delta_xy << std::endl;
     std::cout << "Ring ID: " << ring_id << std::endl;
     sleep(2);
 }
