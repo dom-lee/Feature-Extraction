@@ -654,7 +654,7 @@ void FeatureExtractor::extractCurb_()
                 start_curr(2) - end_prev(2) > setting_.CURB_HEIGHT_THRESHOLD &&
                 angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
                 end_prev.norm() > start_curr.norm() &&
-                (start_curr - end_prev).norm() < setting_.DISCONTINUITY_DISTANCE)
+                (start_curr - end_curr).norm() > setting_.SIDEWALK_LENGTH)
             {
                 transformed_landmark.push_back(start_point);
                 a_test_.push_back(start_point);
@@ -662,7 +662,7 @@ void FeatureExtractor::extractCurb_()
             }
             
             // Discontinued Curb
-            // Right: Sidewalk | Left: Road
+            // Left: Road | Right: Sidewalk
             double azimuth_diff_next = std::atan2(start_next(1), start_next(0)) -
                                        std::atan2(end_curr(1), end_curr(0));
             v_a = (end_next - start_next).head(2); // Road
@@ -672,7 +672,7 @@ void FeatureExtractor::extractCurb_()
                 end_curr(2) - start_next(2) > setting_.CURB_HEIGHT_THRESHOLD &&
                 angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
                 start_next.norm() > end_curr.norm() &&
-                (end_curr - start_next).norm() < setting_.DISCONTINUITY_DISTANCE)
+                (start_curr - end_curr).norm() > setting_.SIDEWALK_LENGTH)
             {
                 transformed_landmark.push_back(end_point);
                 b_test_.push_back(end_point);
