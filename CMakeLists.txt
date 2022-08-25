@@ -15,7 +15,6 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   visualization_msgs
   dynamic_reconfigure
-  PCL
   pcl_ros
 )
 
@@ -34,6 +33,8 @@ else()
   # message(STATUS "=============================================Eigen path: ${EIGEN3_INCLUDE_DIR}")
   set(EIGEN3_INCLUDE_DIRS ${EIGEN3_INCLUDE_DIR})
 endif()
+
+find_package(PCL REQUIRED)
 
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
