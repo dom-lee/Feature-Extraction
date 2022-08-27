@@ -141,5 +141,10 @@ private:
     void executeBresenhamLine(
         double start_x, double start_y, double end_x, double end_y,
         double grid_length, std::vector<std::pair<int, int>>& out_grid_idxs);
+
+    // Iterative end-point fit algorithm
+    void executeDouglasPeucker(pcl::PointCloud<pcl::PointXYZ>& points,
+                               pcl::PointCloud<pcl::PointXYZ>& out_points,
+                               double epsilon);
 };
 #endif /* FEATURE_extractor_H */

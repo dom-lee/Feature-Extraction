@@ -355,7 +355,8 @@ void Driver::reconfigParams_(feature_extraction::feature_extractionConfig& confi
     extractor_setting_.CONTINUITY_ANGLE       = config.continuity_angle;
     extractor_setting_.CURB_HEIGHT_THRESHOLD  = config.curb_height_threshold;
     extractor_setting_.CURB_ANGLE_THRESHOLD   = config.curb_angle_threshold;
-    extractor_setting_.SIDEWALK_LENGTH        = config.sidewalk_length;
+    extractor_setting_.SIDEWALK_MIN_LENGTH    = config.sidewalk_min_length;
+    extractor_setting_.SIDEWALK_MAX_LENGTH    = config.sidewalk_max_length;
 
     // Parameters for Road Model
     extractor_setting_.BEAM_SECTION_NUMBER    = config.beam_section_number;

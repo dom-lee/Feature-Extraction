@@ -575,6 +575,11 @@ void FeatureExtractor::extractCurb_()
                 (azimuth_diff > setting_.DISCONTINUITY_AZIMUTH ||
                  distance_diff > setting_.DISCONTINUITY_DISTANCE);
 
+            if (is_next_point_discontinued)
+            {
+                a_test_.push_back(ground_[i][(j + 1) % ring_size]);
+            }
+
             // Skip when current_point is same with start_point
             if (point_curr == start_point)
             {
@@ -597,6 +602,12 @@ void FeatureExtractor::extractCurb_()
                                 (2 * setting_.SMOOTH_COUNT);
             double is_next_point_sharp = (smoothness > setting_.SMOOTHNESS_THRESHOLD);
 
+
+            if (is_next_point_sharp)
+            {
+                b_test_.push_back(ground_[i][(j + 1) % ring_size]);
+            }
+
             // Check whether it needs to add downsampled lines
             bool need_update_line = is_next_point_discontinued;
             if (!need_update_line && is_next_point_sharp)
@@ -614,12 +625,15 @@ void FeatureExtractor::extractCurb_()
             // Update Downsampled Lines
             if (need_update_line)
             {
-                if (smooth_points_count >= 5)
+                if (smooth_points_count >= 10)
                 {
                     downsampled_lines_[i].push_back({start_point, point_curr});
                 }
                 start_point = is_next_point_discontinued ? point_next : point_curr;
                 smooth_points_count = is_next_point_discontinued ? 0 : 1;
+
+                pcl::PointXYZ pp(start_point(0), start_point(1), start_point(2));
+                c_test_.push_back(pp);
             }
             smooth_points_count++;
         } // End of Pre-Computing Feature Lines
@@ -654,10 +668,10 @@ void FeatureExtractor::extractCurb_()
                 start_curr(2) - end_prev(2) > setting_.CURB_HEIGHT_THRESHOLD &&
                 angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
                 end_prev.norm() > start_curr.norm() &&
-                (start_curr - end_curr).norm() > setting_.SIDEWALK_LENGTH)
+                (start_curr - end_curr).norm() > setting_.SIDEWALK_MIN_LENGTH &&
+                (start_curr - end_curr).norm() < setting_.SIDEWALK_MAX_LENGTH)
             {
                 transformed_landmark.push_back(start_point);
-                a_test_.push_back(start_point);
                 continue;
             }
             
@@ -672,10 +686,10 @@ void FeatureExtractor::extractCurb_()
                 end_curr(2) - start_next(2) > setting_.CURB_HEIGHT_THRESHOLD &&
                 angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
                 start_next.norm() > end_curr.norm() &&
-                (start_curr - end_curr).norm() > setting_.SIDEWALK_LENGTH)
+                (start_curr - end_curr).norm() > setting_.SIDEWALK_MIN_LENGTH &&
+                (start_curr - end_curr).norm() < setting_.SIDEWALK_MAX_LENGTH)
             {
                 transformed_landmark.push_back(end_point);
-                b_test_.push_back(end_point);
                 continue;
             }
            
@@ -691,11 +705,11 @@ void FeatureExtractor::extractCurb_()
                 angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
                 start_curr.norm() > end_curr.norm() &&
                 (start_curr - end_prev).norm() < setting_.DISCONTINUITY_DISTANCE &&
-                (end_curr - start_next).norm() < setting_.DISCONTINUITY_DISTANCE &&
-                (start_next - end_next).norm() > setting_.SIDEWALK_LENGTH)
+                //(end_curr - start_next).norm() < setting_.DISCONTINUITY_DISTANCE &&
+                (start_next - end_next).norm() > setting_.SIDEWALK_MIN_LENGTH &&
+                (start_next - end_next).norm() < setting_.SIDEWALK_MAX_LENGTH)
             {
                 transformed_landmark.push_back(start_point);
-                c_test_.push_back(start_point);
                 continue;
             }
 
@@ -712,7 +726,8 @@ void FeatureExtractor::extractCurb_()
                 end_curr.norm() > start_curr.norm() &&
                 (end_curr - start_next).norm() < setting_.DISCONTINUITY_DISTANCE &&
                 (start_curr - end_prev).norm() < setting_.DISCONTINUITY_DISTANCE &&
-                (end_prev - start_prev).norm() > setting_.SIDEWALK_LENGTH)
+                (end_prev - start_prev).norm() > setting_.SIDEWALK_MIN_LENGTH &&
+                (end_prev - start_prev).norm() < setting_.SIDEWALK_MAX_LENGTH)
             {
                 transformed_landmark.push_back(end_point);
                 continue;
@@ -1015,5 +1030,28 @@ void FeatureExtractor::executeBresenhamLine(
             error += dx;
             y0 += sy;
         }
+    }
+}
+
+void FeatureExtractor::executeDouglasPeucker(
+    pcl::PointCloud<pcl::PointXYZ>& points,
+    pcl::PointCloud<pcl::PointXYZ>& out_points,
+    double epsilon)
+{
+    out_points.clear();
+
+    double dmax = 0;
+    double index = 0;
+
+    for (int i = 1; i < (int)endpoints.size() - 1; ++i)
+    {
+        double distance = 
+    }
+
+    if (dmax > epsilon)
+    {
+        pcl::PointCloud<pcl::PointXYZ> recursive_results_1;
+        pcl::PointCloud<pcl::PointXYZ> recursive_results_2;
+        executeDouglasPeucker()
     }
 }

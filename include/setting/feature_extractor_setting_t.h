@@ -26,7 +26,8 @@ typedef struct feature_extractor_setting
     double CONTINUITY_ANGLE;
     double CURB_HEIGHT_THRESHOLD;
     double CURB_ANGLE_THRESHOLD;
-    double SIDEWALK_LENGTH;
+    double SIDEWALK_MIN_LENGTH;
+    double SIDEWALK_MAX_LENGTH;
 
     // Parameters for Road Modeling
     int    BEAM_SECTION_NUMBER;
