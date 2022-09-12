@@ -17,7 +17,7 @@
 
   </node>
 
-  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find
-  feature_extraction)/rviz/osm.rviz" required="false"/>
+ <!--  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find
+  feature_extraction)/rviz/osm.rviz" required="false"/> -->
 
 </launch>

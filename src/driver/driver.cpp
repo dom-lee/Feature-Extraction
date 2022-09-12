@@ -120,7 +120,7 @@ void Driver::getCloudCallback_(const sensor_msgs::PointCloud2ConstPtr& cloud_msg
     //// Save Time Stamp for TF
     cloud_msg_stamp_ = cloud_msg->header.stamp;
 
-    // Update rings (array of pcl::PointCloud<pcl::PointXYZ)
+    // Update rings (array of pcl::PointCloud<pcl::PointXYZI)
     for (int i = 0; i < VELODYNE_RING_NUMBER; ++i)
     {
         rings_[i].clear();
