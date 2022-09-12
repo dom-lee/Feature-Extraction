@@ -43,12 +43,15 @@ Driver::Driver(ros::NodeHandle& nh)
     bottom_beam_pub_ = nh_.advertise<visualization_msgs::Marker>("bottom_beam", 1, true);
     top_beam_pub_    = nh_.advertise<visualization_msgs::Marker>("top_beam", 1, true);
 
-    downsampled_lines_pub_ = nh_.advertise<visualization_msgs::Marker>("downsampled_lines", 1, true);
+    fitted_lines_pub_ = nh_.advertise<visualization_msgs::Marker>("fitted_lines", 1, true);
+    ground_lines_pub_ = nh_.advertise<visualization_msgs::Marker>("ground_lines", 1, true);
 
     a_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("a", 1);
     b_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("b", 1);
     c_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("c", 1);
-    base_plane_pub_ = nh_.advertise<visualization_msgs::Marker>("base", 1, true);
+
+    base_plane_pub_    = nh_.advertise<visualization_msgs::Marker>("base", 1, true);
+    ceiling_plane_pub_ = nh_.advertise<visualization_msgs::Marker>("ceiling", 1, true);
 
     // Dynamic Reconfiguration
     dynamic_reconfigure::Server<feature_extraction::feature_extractionConfig> server;
@@ -75,25 +78,29 @@ Driver::Driver(ros::NodeHandle& nh)
             feature_extractor.setInputCloud(rings_);
             feature_extractor.run();
 
-            publishPointCloud_<pcl::PointXYZ>(ground_pub_,
-                                              feature_extractor.getGround());
-            publishPointCloud_<pcl::PointXYZ>(obstacles_pub_,
-                                              feature_extractor.getObstacles());
-            publishPointCloud_<pcl::PointXYZ>(landmark_pub_,
-                                              feature_extractor.getLandmark());
+            //publishPointCloud_<pcl::PointXYZ>(ground_pub_,
+                                              //feature_extractor.getGround());
+            //publishPointCloud_<pcl::PointXYZ>(obstacles_pub_,
+                                              //feature_extractor.getObstacles());
+            //publishPointCloud_<pcl::PointXYZ>(landmark_pub_,
+                                              //feature_extractor.getLandmark());
 
             publishPointCloud_<pcl::PointXYZ>(a_pub_, feature_extractor.getA());
             publishPointCloud_<pcl::PointXYZ>(b_pub_, feature_extractor.getB());
             publishPointCloud_<pcl::PointXYZ>(c_pub_, feature_extractor.getC());
 
-            visualizeLines_(downsampled_lines_pub_, 1, "downsampled lines",
-                            1.0f, 0.0f, 1.0f, feature_extractor.getDownSampledLines());
+            visualizeLines_(fitted_lines_pub_, 1, "fitted lines",
+                            1.0f, 1.0f, 1.0f, feature_extractor.getFittedLines());
+            visualizeLines_(ground_lines_pub_, 1, "ground lines",
+                            0.0f, 1.0f, 0.0f, feature_extractor.getGroundLines());
             //visualizeLines_(bottom_beam_pub_, 1, "bottom beam", 1.0f, 0.0f, 1.0f,
                            //feature_extractor.getBottomBeam());
             //visualizeLines_(top_beam_pub_, 1, "top beam", 0.0f, 1.0f, 1.0f,
                            //feature_extractor.getTopBeam());
-            //visualizePlane_(base_plane_pub_, 1, "base",
-                            //feature_extractor.getBasePlane());
+            visualizePlane_(base_plane_pub_, 1, "base",
+                            feature_extractor.getBasePlane());
+            visualizePlane_(ceiling_plane_pub_, 1, "base",
+                            feature_extractor.getCeilingPlane());
         }
         else
         {
@@ -125,6 +132,23 @@ void Driver::getCloudCallback_(const sensor_msgs::PointCloud2ConstPtr& cloud_msg
     {
         rings_[*iter_ring].push_back(cloud[i]);
     }
+
+
+    //// PCA
+    //pcl::PCA<pcl::PointXYZ> pca;
+    //pca.setInputCloud(cloud.makeShared());
+    //Eigen::Matrix3f aaa = pca.getEigenVectors();
+    //Eigen::Vector4f mean = pca.getMean();
+
+    //Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
+    //transform.block<3, 3>(0, 0) = aaa;
+    //transform.block<4, 1>(0, 3) = mean;
+
+
+    //pcl::PointCloud<pcl::PointXYZ> transformed_points;
+    //pcl::transformPointCloud(cloud, transformed_points, transform.inverse());
+
+
     
     //// Transform PointCloud from Velodyne Frame to Odom Frame
     //tf_listener_.waitForTransform("odom", publisher_frame_,
@@ -201,9 +225,9 @@ void Driver::publishPointCloud_(ros::Publisher& publisher,
 
 template <class PointT>
 void Driver::visualizeLines_(ros::Publisher& publisher,
-                            int id, std::string name,
-                            double r, double g, double b,
-                            std::vector<std::pair<PointT, PointT>> lines)
+                             int id, std::string name,
+                             double r, double g, double b,
+                             const std::vector<PointT>& lines)
 {
     visualization_msgs::Marker line_list;
 
@@ -216,7 +240,7 @@ void Driver::visualizeLines_(ros::Publisher& publisher,
     line_list.action = visualization_msgs::Marker::ADD;
     line_list.pose.orientation.w = 1.0;
 
-    line_list.scale.x = 0.3;
+    line_list.scale.x = 0.1;
     
     line_list.color.r = r;
     line_list.color.g = g;
@@ -226,15 +250,15 @@ void Driver::visualizeLines_(ros::Publisher& publisher,
     geometry_msgs::Point p1;
     geometry_msgs::Point p2;
 
-    for (const auto& line : lines)
+    for (int i = 0; i < (int)lines.size() / 2; ++i)
     {
-        p1.x = line.first.x;
-        p1.y = line.first.y;
-        p1.z = line.first.z;
+        p1.x = lines[2 * i].x;
+        p1.y = lines[2 * i].y;
+        p1.z = lines[2 * i].z;
 
-        p2.x = line.second.x;
-        p2.y = line.second.y;
-        p2.z = line.second.z;
+        p2.x = lines[2 * i + 1].x;
+        p2.y = lines[2 * i + 1].y;
+        p2.z = lines[2 * i + 1].z;
 
         line_list.points.push_back(p1);
         line_list.points.push_back(p2);
@@ -260,20 +284,23 @@ void Driver::visualizePlane_(ros::Publisher& publisher,
     cube.pose.position.y = 0;
     cube.pose.position.z = -plane_coeff(3) / plane_coeff(2);
 
-    Eigen::Vector3f basis;
-    basis << 0, 0, 1;
+    Eigen::Vector3f basis(0, 0, 1);
     Eigen::Vector3f normal = plane_coeff.head(3);
     normal.normalize();
 
     Eigen::Vector3f cross_product = basis.cross(normal);
-    cube.pose.orientation.x = cross_product(0);
-    cube.pose.orientation.y = cross_product(1);
-    cube.pose.orientation.z = cross_product(2);
-    cube.pose.orientation.w = 1 + basis.dot(normal);
+    Eigen::Vector4f quaternion(cross_product(0), cross_product(1),
+                               cross_product(2), 1 + basis.dot(normal));
+    quaternion.normalize();
 
-    cube.scale.x = 10.0;
-    cube.scale.y = 10.0;
-    cube.scale.z = 0.1;
+    cube.pose.orientation.x = quaternion(0);
+    cube.pose.orientation.y = quaternion(1); 
+    cube.pose.orientation.z = quaternion(2); 
+    cube.pose.orientation.w = quaternion(3); 
+
+    cube.scale.x = 15.0;
+    cube.scale.y = 15.0;
+    cube.scale.z = 0.01;
 
     cube.color.r = 1.0f;
     cube.color.g = 1.0f;
@@ -334,6 +361,25 @@ void Driver::reconfigParams_(feature_extraction::feature_extractionConfig& confi
 
     // Parameters for Base Planar Estimation
     extractor_setting_.RING_TO_FIT_BASE       = config.ring_to_fit_base;
+    extractor_setting_.GRADIENT_THRESHOLD     = config.gradient_threshold;
+    extractor_setting_.BASE_FIT_THRESHOLD     = config.base_fit_threshold;
+    
+    // Parameters for Fitting Lines
+    extractor_setting_.DISCONTINUITY_DISTANCE = config.discontinuity_distance;
+    extractor_setting_.EPSILON                = config.epsilon;
+
+    // Parameters for Filtering Ground Lines
+    extractor_setting_.GROUND_DIST_THRESHOLD  = config.ground_dist_threshold;
+    extractor_setting_.GROUND_ANGLE_THRESHOLD = config.ground_angle_threshold;
+
+    // Parameters for Wall Extraction
+    extractor_setting_.SECTION_NUMBER         = config.section_number;
+    extractor_setting_.WALL_HEIGHT_THRESHOLD  = config.wall_height_threshold;
+
+
+
+
+
     extractor_setting_.SMOOTH_WINDOW_SIZE     = config.smooth_window_size;
     extractor_setting_.SMOOTH_THRESHOLD       = config.smooth_threshold;
 
@@ -349,7 +395,6 @@ void Driver::reconfigParams_(feature_extraction::feature_extractionConfig& confi
 
     // Parameters for Curb Extraction
     extractor_setting_.DISCONTINUITY_AZIMUTH  = config.discontinuity_azimuth;
-    extractor_setting_.DISCONTINUITY_DISTANCE = config.discontinuity_distance;
     extractor_setting_.SMOOTHNESS_THRESHOLD   = config.smoothness_threshold;
     extractor_setting_.SMOOTH_COUNT           = config.smooth_count;
     extractor_setting_.CONTINUITY_ANGLE       = config.continuity_angle;

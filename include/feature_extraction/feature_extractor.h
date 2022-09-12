@@ -30,10 +30,15 @@
 #include <pcl/ModelCoefficients.h>
 #include <pcl/sample_consensus/method_types.h>
 #include <pcl/sample_consensus/sac_model_plane.h>
+#include <pcl/common/pca.h>
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/filters/model_outlier_removal.h>
 #include <pcl/filters/passthrough.h>
 #include <pcl/filters/extract_indices.h>
+
+// General Functions
+#include "douglasPeucker.hpp"
+#include "estimatePlaneRANSAC.hpp"
 
 // Utils
 #include "utils/timing.h"
@@ -65,10 +70,14 @@ public:
     pcl::PointCloud<pcl::PointXYZ>::Ptr getB();
     pcl::PointCloud<pcl::PointXYZ>::Ptr getC();
 
-    std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ>> getDownSampledLines();
+    std::vector<pcl::PointXYZ> getFittedLines();
+    std::vector<pcl::PointXYZ> getGroundLines();
+
     std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ>> getBottomBeam();
     std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ>> getTopBeam();
+
     Eigen::Vector4f getBasePlane();
+    Eigen::Vector4f getCeilingPlane();
 
 private:
     // Feature Extractor Parameter
@@ -82,6 +91,7 @@ private:
     // Base Plane model
     bool base_plane_updated_;
     Eigen::Vector4f base_coeff_;
+    Eigen::Vector4f ceiling_coeff_;
     
     // Tramsformation
     Eigen::Matrix4f transformation_;
@@ -94,8 +104,9 @@ private:
     std::array<pcl::PointCloud<pcl::PointXYZ>, RING_NUMBER> ground_;
     pcl::PointCloud<pcl::PointXYZ> obstacles_;
 
-    // Downsampled Lines from Ground (Transformed)
-    std::vector<std::vector<std::pair<Eigen::Vector3f, Eigen::Vector3f>>> downsampled_lines_;
+    // Fitted Lines from Douglas-Peucker Algorithm
+    std::array<std::vector<pcl::PointXYZ>, RING_NUMBER> fitted_lines_;
+    std::vector<pcl::PointXYZ> ground_lines_;
 
     // Beam Modeal
     // {azimuth, distance}
@@ -112,12 +123,11 @@ private:
     
 
     // Estimate Base Planar to roughly estimate LiDAR pose
-    template<class PointT>
+    template <class PointT>
     bool estimateBasePlane_(std::array<pcl::PointCloud<PointT>, RING_NUMBER>& rings);
 
-    // Find coefficient of plane and inlier with RANSAC
-    template<class PointT>
-    Eigen::Vector4f estimatePlaneRANSAC_(pcl::PointCloud<PointT>& cloud);
+    // Find Wall
+    void extractWall_();
 
     // Extract Ground and Find Obstacles with grid method
     void extractGround_();
@@ -142,9 +152,13 @@ private:
         double start_x, double start_y, double end_x, double end_y,
         double grid_length, std::vector<std::pair<int, int>>& out_grid_idxs);
 
-    // Iterative end-point fit algorithm
-    void executeDouglasPeucker(pcl::PointCloud<pcl::PointXYZ>& points,
-                               pcl::PointCloud<pcl::PointXYZ>& out_points,
-                               double epsilon);
+    // Fitting Sorted PointCloud(same ring_id) with Douglas-Peucker Algorithm
+    template <class PointT>
+    void fitPointCloud_(const pcl::PointCloud<PointT>& in_ring,
+                        std::vector<PointT>& out_line_list);
+
+    // Check Whether Finite Line represenrs Ground
+    template <class PointT>
+    bool checkIsGroundLine_(const PointT& line_end_1, const PointT& line_end_2);
 };
 #endif /* FEATURE_extractor_H */

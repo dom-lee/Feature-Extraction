@@ -5,6 +5,21 @@ typedef struct feature_extractor_setting
 {
     // Parameters for Base Plane Estimation
     int    RING_TO_FIT_BASE;
+    double GRADIENT_THRESHOLD;
+    double BASE_FIT_THRESHOLD;
+
+    // Parameters for Fitting Lines
+    double DISCONTINUITY_DISTANCE;
+    double EPSILON;
+
+    // Parameters for Filtering Ground Lines
+    double GROUND_DIST_THRESHOLD;
+    double GROUND_ANGLE_THRESHOLD;
+
+    // Parameters for Wall Extraction
+    double SECTION_NUMBER;
+    double WALL_HEIGHT_THRESHOLD;
+
     int    SMOOTH_WINDOW_SIZE;
     double SMOOTH_THRESHOLD;
 
@@ -20,7 +35,6 @@ typedef struct feature_extractor_setting
 
     // Parameters for Curb Extraction
     double DISCONTINUITY_AZIMUTH;
-    double DISCONTINUITY_DISTANCE;
     double SMOOTHNESS_THRESHOLD;
     int    SMOOTH_COUNT;
     double CONTINUITY_ANGLE;

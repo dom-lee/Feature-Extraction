@@ -29,6 +29,7 @@
 #include <pcl/point_cloud.h> // PointCloud
 #include <pcl/point_types.h> // PointXYZ
 #include <pcl_conversions/pcl_conversions.h> // fromROSMsg
+#include <pcl/common/pca.h>
 #include <pcl/registration/gicp.h>
 
 // Messgaes
@@ -79,11 +80,14 @@ private:
     ros::Publisher b_pub_;
     ros::Publisher c_pub_;
 
-    ros::Publisher downsampled_lines_pub_;
+    ros::Publisher fitted_lines_pub_;
+    ros::Publisher ground_lines_pub_;
     ros::Publisher bottom_beam_pub_;
     ros::Publisher top_beam_pub_;
     ros::Publisher middle_beam_pub_;
+
     ros::Publisher base_plane_pub_;
+    ros::Publisher ceiling_plane_pub_;
 
     // Paramters
     lidar_setting_t lidar_setting_;
@@ -105,9 +109,9 @@ private:
 
     template <class PointT>
     void visualizeLines_(ros::Publisher& publisher,
-                        int id, std::string name,
-                        double r, double g, double b,
-                        std::vector<std::pair<PointT, PointT>> lines);
+                         int id, std::string name,
+                         double r, double g, double b,
+                         const std::vector<PointT>& lines);
 
     void visualizePlane_(ros::Publisher& publisher,
                          int id, std::string name,

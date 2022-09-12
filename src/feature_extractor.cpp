@@ -41,19 +41,20 @@ void FeatureExtractor::setInputCloud(
     {
         return;
     }
-    
-    // Transform the Point Cloud to make base parallel to the XY plane
+
+    // Sort Point Cloud and Fit Line
     for (int i = 0; i < RING_NUMBER; ++i)
     {
-        pcl::transformPointCloud(rings[i], transformed_rings_[i], transformation_);
-
         // Sort Rings by azimuth
-        std::sort(transformed_rings_[i].begin(), transformed_rings_[i].end(),
+        std::sort(rings[i].begin(), rings[i].end(),
             [](const pcl::PointXYZ& lhs, const pcl::PointXYZ& rhs)
             {
                 return std::atan2(lhs.y, lhs.x) < std::atan2(rhs.y, rhs.x);
             }
         );
+
+        // Fitting PointCloud To Reduce Noise
+        fitPointCloud_(rings[i], fitted_lines_[i]);
     }
 
     debugger::debugColorTextOutput("Finish SetInputCloud", 1, BG);
@@ -64,9 +65,7 @@ void FeatureExtractor::run()
     if (base_plane_updated_)
     {
         debugger::debugColorTextOutput("[Feature Extractor] Execute", 5, BW);
-        extractGround_();
-        extractCurb_();
-        //estimateRoadModel_();
+        extractWall_();
     }
     else
     {
@@ -112,23 +111,20 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr FeatureExtractor::getC()
     return c_test_.makeShared();
 }
 
-std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ>> FeatureExtractor::getDownSampledLines()
+std::vector<pcl::PointXYZ> FeatureExtractor::getFittedLines()
 {
-    std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ>> downsampled_lines;
-    for (int i = 0; i < setting_.RING_TO_ANALYZE; ++i)
+    std::vector<pcl::PointXYZ> fitted_lines;
+    for (int i = 0; i < fitted_lines_.size(); ++i)
     {
-        for (int k = 0; k < downsampled_lines_[i].size(); ++k)
-        {
-            Eigen::Vector3f& p1 = downsampled_lines_[i][k].first;
-            Eigen::Vector3f& p2 = downsampled_lines_[i][k].second;
-
-            pcl::PointXYZ point1(p1(0), p1(1), p1(2));
-            pcl::PointXYZ point2(p2(0), p2(1), p2(2));
-            
-            downsampled_lines.push_back({point1, point2});
-        }
+        fitted_lines.insert(fitted_lines.end(),
+                            fitted_lines_[i].begin(), fitted_lines_[i].end());
     }
-    return downsampled_lines;
+    return fitted_lines;
+}
+
+std::vector<pcl::PointXYZ> FeatureExtractor::getGroundLines()
+{
+    return ground_lines_;
 }
 
 std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ>> FeatureExtractor::getBottomBeam()
@@ -169,56 +165,82 @@ Eigen::Vector4f FeatureExtractor::getBasePlane()
     return base_coeff_;
 }
 
+Eigen::Vector4f FeatureExtractor::getCeilingPlane()
+{
+    return ceiling_coeff_;
+}
+
 template <class PointT>
 bool FeatureExtractor::estimateBasePlane_(
     std::array<pcl::PointCloud<PointT>, RING_NUMBER>& rings)
 {
-    // Sampling Candidates for Base Planar without Obstacles
+    // Sampling Candidates for Base Planar by filtering wall
     pcl::PointCloud<PointT> base_candidate;
+
+    // Split Segment by azimuth
+    const int section_number = 360;
+
+    // Save {r, z} of point that have minimum Z value for each section
+    std::vector<std::pair<double, double>> prev_ring_r_z(section_number, {0, 0});
+    std::vector<std::pair<double, double>> curr_ring_r_z(section_number, {0, 0});
+
+    // Save PointClouds for section
+    std::vector<pcl::PointCloud<PointT>> prev_ring_cloud(section_number);
+    std::vector<pcl::PointCloud<PointT>> curr_ring_cloud(section_number);
+
     for (int i = 0; i < setting_.RING_TO_FIT_BASE; ++i)
     {
-        // Sort Rings by azimuth
-        std::sort(rings[i].begin(), rings[i].end(),
-            [](const pcl::PointXYZ& lhs, const pcl::PointXYZ& rhs)
-            {
-                return std::atan2(lhs.y, lhs.x) < std::atan2(rhs.y, rhs.x);
-            }
-        );
-
         int ring_size = rings[i].size();
-
-        // Smoothness Filter (ex. Remove Grass and Obstacles)
-        std::vector<double> dist_diff_ones(ring_size);
-        std::vector<double> dist_diff_two(ring_size);
         for (int j = 0; j < ring_size; ++j)
         {
-            pcl::PointXYZ& p_prev = rings[i][(j - 1 + ring_size) % ring_size];
-            pcl::PointXYZ& p_curr = rings[i][j];
-            pcl::PointXYZ& p_next = rings[i][(j + 1) % ring_size];
+            pcl::PointXYZ& point = rings[i][j];
 
-            dist_diff_ones[j] = pcl::euclideanDistance(p_prev, p_curr) + 
-                                pcl::euclideanDistance(p_curr, p_next);
-            dist_diff_two[j]  = pcl::euclideanDistance(p_prev, p_next);
+            double azimuth = std::atan2(point.y, point.x);
+            double r = std::sqrt(std::pow(point.x, 2) + std::pow(point.y, 2));
+
+            int azimuth_idx = int(azimuth * 180 / M_PI + 180) % 360;
+
+            // Updated curr_ring_r_z when the point has a lower z value
+            if (curr_ring_cloud[azimuth_idx].empty() ||
+                point.z < curr_ring_r_z[azimuth_idx].second)
+            {
+                curr_ring_r_z[azimuth_idx] = {r, point.z};
+            }
+            curr_ring_cloud[azimuth_idx].push_back(point);
         }
 
-        for (int j = 0; j < ring_size; ++j)
+        // Skip checking gradient for Ring 0
+        if (i == 0)
         {
-            double smoothness_coeff = dist_diff_two[j] / dist_diff_ones[j];
-            for (int w = 1; w < setting_.SMOOTH_WINDOW_SIZE; ++w)
-            {
-                int w_prev = (j - w + ring_size) % ring_size;
-                int w_next = (j + w) % ring_size;
+            std::swap(curr_ring_r_z, prev_ring_r_z);
+            std::swap(curr_ring_cloud, prev_ring_cloud);
+            continue;
+        }
 
-                smoothness_coeff += dist_diff_two[w_prev] / dist_diff_ones[w_prev];
-                smoothness_coeff += dist_diff_two[w_next] / dist_diff_ones[w_next];
-            }
-            smoothness_coeff /= (2 * setting_.SMOOTH_WINDOW_SIZE - 1);
-
-            if (smoothness_coeff > setting_.SMOOTH_THRESHOLD)
+        // Calculate Gradient for each section
+        for (int k = 0; k < section_number; ++k)
+        {
+            // Skip when section is empty
+            if (curr_ring_cloud[k].empty())
             {
-                base_candidate.push_back(rings[i][j]);
+                continue;
             }
-        } // End of Smoothness Filte
+
+            double gradient = (curr_ring_r_z[k].second - prev_ring_r_z[k].second) /
+                              (curr_ring_r_z[k].first  - prev_ring_r_z[k].first);
+
+            // [* Note *] Check absolute value of gradient 
+            if (std::abs(gradient) < setting_.GRADIENT_THRESHOLD)
+            {
+                base_candidate += prev_ring_cloud[k];
+            }
+
+            prev_ring_r_z[k] = curr_ring_r_z[k];
+            prev_ring_cloud[k] = curr_ring_cloud[k];
+
+            curr_ring_r_z[k] = {0, 0};
+            curr_ring_cloud[k].clear();
+        }
     } // Finish Sampling Candidates for Base
 
     if (base_candidate.size() < 10)
@@ -229,7 +251,8 @@ bool FeatureExtractor::estimateBasePlane_(
     }
 
     // Set Base Planar Model (ax + by + cz + d = 0)
-    auto tmp_base_coeff = estimatePlaneRANSAC_(base_candidate);
+    auto tmp_base_coeff = estimatePlaneRANSAC(base_candidate,
+                                              setting_.BASE_FIT_THRESHOLD);
     debugger::debugColorOutput("Base Coefficients \n", tmp_base_coeff, 3, BG); 
 
     // Sanity Check for Vertical Base Planar
@@ -250,8 +273,8 @@ bool FeatureExtractor::estimateBasePlane_(
     // | 0  c -b |
     // | a  b  c | 
     transformation_ = Eigen::Matrix4f::Identity(4, 4);
-    transformation_.block<3, 3>(0, 0) << base_coeff_(2), 0, -base_coeff_(0),
-                                         0, base_coeff_(2), -base_coeff_(1),
+    transformation_.block<3, 3>(0, 0) << base_coeff_(2), 0,              -base_coeff_(0),
+                                         0,              base_coeff_(2), -base_coeff_(1),
                                          base_coeff_(0), base_coeff_(1), base_coeff_(2);
     transformation_.rowwise().normalize();
 
@@ -265,44 +288,86 @@ bool FeatureExtractor::estimateBasePlane_(
     return true;
 }
 
-template <class PointT>
-Eigen::Vector4f FeatureExtractor::estimatePlaneRANSAC_(
-    pcl::PointCloud<PointT>& cloud)
+void FeatureExtractor::extractWall_()
 {
-    Eigen::Vector4f plane_coeff;
-    // Plane Model segmentation with RANSAC
-    // https://pcl.readthedocs.io/en/latest/planar_segmentation.html
-    pcl::ModelCoefficients plane_model_coeff; 
-    if (cloud.size() < 10)
+    ground_lines_.clear();
+    for (int i = 0; i < fitted_lines_.size(); ++i)
     {
-        debugger::debugColorTextOutput("Not enough Data for RANSAC", 5, BY);
-        return plane_coeff;
+        for (int j = 0; j < (int)fitted_lines_[i].size() / 2; ++j)
+        {
+            if (checkIsGroundLine_(fitted_lines_[i][2 * j],
+                                   fitted_lines_[i][2 * j + 1]))
+            {
+                ground_lines_.push_back(fitted_lines_[i][2 * j]);
+                ground_lines_.push_back(fitted_lines_[i][2 * j + 1]);
+            }
+
+        }
+        
     }
 
-    pcl::PointIndices inliers;
+    // Interpolate Fitted Lines by azimuth
+    double resolution = 2.0 * M_PI / (double)setting_.SECTION_NUMBER;
 
-    // Create the segmentation object
-    pcl::SACSegmentation<PointT> seg;
-    // Optional
-    seg.setOptimizeCoefficients(true);
-    // Mandatory
-    seg.setModelType(pcl::SACMODEL_PLANE);
-    seg.setMethodType(pcl::SAC_RANSAC);
-    seg.setDistanceThreshold(setting_.FIT_PLANE_THRESHOLD);
+    std::vector<std::vector<pcl::PointXYZ>> interpolated_fitted_lines(
+        fitted_lines_.size(), std::vector<pcl::PointXYZ>(setting_.SECTION_NUMBER));
+    for (int i = 0; i < fitted_lines_.size(); ++i)
+    {
+        for (int j = 0; j < (int)fitted_lines_[i].size() / 2; ++j)
+        {
+            double x1 = fitted_lines_[i][2 * j].x;
+            double y1 = fitted_lines_[i][2 * j].y;
+            double z1 = fitted_lines_[i][2 * j].z;
+            double x2 = fitted_lines_[i][2 * j + 1].x;
+            double y2 = fitted_lines_[i][2 * j + 1].y;
+            double z2 = fitted_lines_[i][2 * j + 1].z;
+
+            double azimuth_start = std::atan2(y1, x1);
+            double azimuth_end   = std::atan2(y2, x2);
+            
+            int start_idx = std::ceil((azimuth_start + M_PI) / resolution);
+            int end_idx   = std::floor((azimuth_end + M_PI) / resolution);
+
+            for (int k = start_idx; k < end_idx + 1; ++k)
+            {
+                double azimuth = k * resolution - M_PI;
+                double r = (y1 * x2 - x1 * y2) /
+                           ((y1 - y2) * std::cos(azimuth) - 
+                            (x1 - x2) * std::sin(azimuth));
+                
+                pcl::PointXYZ interpolated_point;
+                interpolated_point.x = r * std::cos(azimuth);
+                interpolated_point.y = r * std::sin(azimuth);
+                interpolated_point.z = z1 + (z1 - z2) / (x1 - x2) *
+                                       (interpolated_point.x - x1);
+
+                a_test_.push_back(interpolated_point);
+            }
+        }
+    }
+
+    //// Filter Wall by Check Mesh
+    //for (int i = 0; i < (int)fitted_lines_.size() - 1; ++i)
+    //{
+        //for (int j = 0; j < setting_.SECTION_NUMBER; ++j)
+        //{
+            
+        //}
+    //}
+
+
+    //pcl::PassThrough<pcl::PointXYZ> pcl_passthrough;
+    //pcl::PointCloud<pcl::PointXYZ> filtered_cloud;
+    //for (int i = 0; i < RING_NUMBER; ++i)
+    //{
+        //pcl_passthrough.setInputCloud(transformed_rings_[i].makeShared());
+        //pcl_passthrough.setFilterFieldName("z");
+        //pcl_passthrough.setFilterLimits(-estimated_lidar_height_ + 0.1,
+                                        //-estimated_lidar_height_ + 0.3);
+        //pcl_passthrough.filter(filtered_cloud);
+        //c_test_ += filtered_cloud;
+    //}
     
-    // Segment Planar Model
-    seg.setInputCloud(cloud.makeShared());
-    seg.segment(inliers, plane_model_coeff);
-
-    if (inliers.indices.empty())
-    {
-        PCL_ERROR("Could not estimate a planar model for the given dataset.\n");
-    }
-
-    plane_coeff << plane_model_coeff.values[0], plane_model_coeff.values[1],
-                   plane_model_coeff.values[2], plane_model_coeff.values[3];
-
-    return plane_coeff;
 }
 
 void FeatureExtractor::extractGround_()
@@ -543,202 +608,201 @@ void FeatureExtractor::extractGround_()
     }
 }
 
-void FeatureExtractor::extractCurb_()
-{
-    downsampled_lines_.resize(ground_.size());
-    pcl::PointCloud<pcl::PointXYZ> transformed_landmark;
-    for (int i = 0; i < ground_.size(); ++i)
-    {
-        downsampled_lines_[i].clear();
+//void FeatureExtractor::extractCurb_()
+//{
+    //downsampled_lines_.resize(ground_.size());
+    //pcl::PointCloud<pcl::PointXYZ> transformed_landmark;
+    //for (int i = 0; i < ground_.size(); ++i)
+    //{
+        //downsampled_lines_[i].clear();
 
-        if (ground_[i].empty())
-        {
-            continue;
-        }
-        int ring_size = ground_[i].size();
+        //if (ground_[i].empty())
+        //{
+            //continue;
+        //}
+        //int ring_size = ground_[i].size();
 
-        // Precompute Line Section
-        int smooth_points_count = 1;
-        Eigen::Vector3f start_point = ground_[i][0].getVector3fMap();
-        for (int j = 0; j < ring_size; ++j)
-        {
-            Eigen::Vector3f point_curr = ground_[i][j].getVector3fMap();
-            Eigen::Vector3f point_next = ground_[i][(j + 1) % ring_size].getVector3fMap();
+        //// Precompute Line Section
+        //int smooth_points_count = 1;
+        //Eigen::Vector3f start_point = ground_[i][0].getVector3fMap();
+        //for (int j = 0; j < ring_size; ++j)
+        //{
+            //Eigen::Vector3f point_curr = ground_[i][j].getVector3fMap();
+            //Eigen::Vector3f point_next = ground_[i][(j + 1) % ring_size].getVector3fMap();
 
-            // Check Discontinuity
-            double azimuth_curr = std::atan2(point_curr(1), point_curr(0));
-            double azimuth_next = std::atan2(point_next(1), point_next(0));
+            //// Check Discontinuity
+            //double azimuth_curr = std::atan2(point_curr(1), point_curr(0));
+            //double azimuth_next = std::atan2(point_next(1), point_next(0));
 
-            double azimuth_diff = azimuth_next - azimuth_curr;
-            double distance_diff = (point_curr - point_next).norm();
-            bool is_next_point_discontinued = 
-                (azimuth_diff > setting_.DISCONTINUITY_AZIMUTH ||
-                 distance_diff > setting_.DISCONTINUITY_DISTANCE);
+            //double azimuth_diff = azimuth_next - azimuth_curr;
+            //double distance_diff = (point_curr - point_next).norm();
+            //bool is_next_point_discontinued = 
+                //(azimuth_diff > setting_.DISCONTINUITY_AZIMUTH ||
+                 //distance_diff > setting_.DISCONTINUITY_DISTANCE);
 
-            if (is_next_point_discontinued)
-            {
-                a_test_.push_back(ground_[i][(j + 1) % ring_size]);
-            }
+            //if (is_next_point_discontinued)
+            //{
+                //a_test_.push_back(ground_[i][(j + 1) % ring_size]);
+            //}
 
-            // Skip when current_point is same with start_point
-            if (point_curr == start_point)
-            {
-                start_point = is_next_point_discontinued ? point_next : start_point;
-                smooth_points_count = is_next_point_discontinued ? 0 : 1;
-                continue;
-            }
+            //// Skip when current_point is same with start_point
+            //if (point_curr == start_point)
+            //{
+                //start_point = is_next_point_discontinued ? point_next : start_point;
+                //smooth_points_count = is_next_point_discontinued ? 0 : 1;
+                //continue;
+            //}
 
-            // Corner Detection for next point by checking Curvature
-            Eigen::Vector3f sum_vector = Eigen::Vector3f::Zero();
-            for (int w = 0; w < setting_.SMOOTH_COUNT; ++w)
-            {
-                int idx_next = (j + w + 1) % ring_size;
-                int idx_prev = (j - w - 1 + ring_size) % ring_size;
+            //// Corner Detection for next point by checking Curvature
+            //Eigen::Vector3f sum_vector = Eigen::Vector3f::Zero();
+            //for (int w = 0; w < setting_.SMOOTH_COUNT; ++w)
+            //{
+                //int idx_next = (j + w + 1) % ring_size;
+                //int idx_prev = (j - w - 1 + ring_size) % ring_size;
 
-                sum_vector += (point_next - ground_[i][idx_next].getVector3fMap());
-                sum_vector += (point_next - ground_[i][idx_prev].getVector3fMap());
-            }
-            double smoothness = sum_vector.norm() / point_next.norm() /
-                                (2 * setting_.SMOOTH_COUNT);
-            double is_next_point_sharp = (smoothness > setting_.SMOOTHNESS_THRESHOLD);
+                //sum_vector += (point_next - ground_[i][idx_next].getVector3fMap());
+                //sum_vector += (point_next - ground_[i][idx_prev].getVector3fMap());
+            //}
+            //double smoothness = sum_vector.norm() / point_next.norm() /
+                                //(2 * setting_.SMOOTH_COUNT);
+            //double is_next_point_sharp = (smoothness > setting_.SMOOTHNESS_THRESHOLD);
 
 
-            if (is_next_point_sharp)
-            {
-                b_test_.push_back(ground_[i][(j + 1) % ring_size]);
-            }
+            //if (is_next_point_sharp)
+            //{
+                //b_test_.push_back(ground_[i][(j + 1) % ring_size]);
+            //}
 
-            // Check whether it needs to add downsampled lines
-            bool need_update_line = is_next_point_discontinued;
-            if (!need_update_line && is_next_point_sharp)
-            {
-                Eigen::Vector3f v_a = start_point - point_curr;
-                Eigen::Vector3f v_b = point_next - point_curr;
-                double angle = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
+            //// Check whether it needs to add downsampled lines
+            //bool need_update_line = is_next_point_discontinued;
+            //if (!need_update_line && is_next_point_sharp)
+            //{
+                //Eigen::Vector3f v_a = start_point - point_curr;
+                //Eigen::Vector3f v_b = point_next - point_curr;
+                //double angle = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
 
-                if (angle < setting_.CONTINUITY_ANGLE)
-                {
-                    need_update_line = true;
-                }
-            }
+                //if (angle < setting_.CONTINUITY_ANGLE)
+                //{
+                    //need_update_line = true;
+                //}
+            //}
 
-            // Update Downsampled Lines
-            if (need_update_line)
-            {
-                if (smooth_points_count >= 10)
-                {
-                    downsampled_lines_[i].push_back({start_point, point_curr});
-                }
-                start_point = is_next_point_discontinued ? point_next : point_curr;
-                smooth_points_count = is_next_point_discontinued ? 0 : 1;
+            //// Update Downsampled Lines
+            //if (need_update_line)
+            //{
+                //if (smooth_points_count >= 10)
+                //{
+                    //downsampled_lines_[i].push_back({start_point, point_curr});
+                //}
+                //start_point = is_next_point_discontinued ? point_next : point_curr;
+                //smooth_points_count = is_next_point_discontinued ? 0 : 1;
 
-                pcl::PointXYZ pp(start_point(0), start_point(1), start_point(2));
-                c_test_.push_back(pp);
-            }
-            smooth_points_count++;
-        } // End of Pre-Computing Feature Lines
+                //pcl::PointXYZ pp(start_point(0), start_point(1), start_point(2));
+            //}
+            //smooth_points_count++;
+        //} // End of Pre-Computing Feature Lines
 
-        // Execute Curb Extraction with FeatureLines
-        for (int k = 0; k < (int)downsampled_lines_[i].size() - 1; ++k)
-        {
-            // Assume current line is sidewalk
-            Eigen::Vector3f& start_curr = downsampled_lines_[i][k].first;
-            Eigen::Vector3f& end_curr   = downsampled_lines_[i][k].second;
-            pcl::PointXYZ start_point(start_curr(0), start_curr(1), start_curr(2));
-            pcl::PointXYZ end_point(end_curr(0), end_curr(1), end_curr(2));
+        //// Execute Curb Extraction with FeatureLines
+        //for (int k = 0; k < (int)downsampled_lines_[i].size() - 1; ++k)
+        //{
+            //// Assume current line is sidewalk
+            //Eigen::Vector3f& start_curr = downsampled_lines_[i][k].first;
+            //Eigen::Vector3f& end_curr   = downsampled_lines_[i][k].second;
+            //pcl::PointXYZ start_point(start_curr(0), start_curr(1), start_curr(2));
+            //pcl::PointXYZ end_point(end_curr(0), end_curr(1), end_curr(2));
 
-            // Adjacent Downsampled lines
-            Eigen::Vector3f& start_next = downsampled_lines_[i][k + 1].first;
-            Eigen::Vector3f& end_next   = downsampled_lines_[i][k + 1].second;
-            Eigen::Vector3f& start_prev = downsampled_lines_[i][k - 1].first;
-            Eigen::Vector3f& end_prev   = downsampled_lines_[i][k - 1].second;
+            //// Adjacent Downsampled lines
+            //Eigen::Vector3f& start_next = downsampled_lines_[i][k + 1].first;
+            //Eigen::Vector3f& end_next   = downsampled_lines_[i][k + 1].second;
+            //Eigen::Vector3f& start_prev = downsampled_lines_[i][k - 1].first;
+            //Eigen::Vector3f& end_prev   = downsampled_lines_[i][k - 1].second;
 
-            // Vector for using angular threshold
-            Eigen::Vector2f v_a, v_b, v_c;
-            double angle_road_curb;
+            //// Vector for using angular threshold
+            //Eigen::Vector2f v_a, v_b, v_c;
+            //double angle_road_curb;
 
-            // Discontinued Curb
-            // Left: Sidewalk | Right: Road
-            double azimuth_diff_prev = std::atan2(start_curr(1), start_curr(0)) - 
-                                       std::atan2(end_prev(1), end_prev(0));
-            v_a = (start_prev - end_prev).head(2); // Road
-            v_b = (start_curr - end_prev).head(2); // Curb
-            angle_road_curb = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
-            if (azimuth_diff_prev < setting_.DISCONTINUITY_AZIMUTH &&
-                start_curr(2) - end_prev(2) > setting_.CURB_HEIGHT_THRESHOLD &&
-                angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
-                end_prev.norm() > start_curr.norm() &&
-                (start_curr - end_curr).norm() > setting_.SIDEWALK_MIN_LENGTH &&
-                (start_curr - end_curr).norm() < setting_.SIDEWALK_MAX_LENGTH)
-            {
-                transformed_landmark.push_back(start_point);
-                continue;
-            }
+            //// Discontinued Curb
+            //// Left: Sidewalk | Right: Road
+            //double azimuth_diff_prev = std::atan2(start_curr(1), start_curr(0)) - 
+                                       //std::atan2(end_prev(1), end_prev(0));
+            //v_a = (start_prev - end_prev).head(2); // Road
+            //v_b = (start_curr - end_prev).head(2); // Curb
+            //angle_road_curb = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
+            //if (azimuth_diff_prev < setting_.DISCONTINUITY_AZIMUTH &&
+                //start_curr(2) - end_prev(2) > setting_.CURB_HEIGHT_THRESHOLD &&
+                //angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
+                //end_prev.norm() > start_curr.norm() &&
+                //(start_curr - end_curr).norm() > setting_.SIDEWALK_MIN_LENGTH &&
+                //(start_curr - end_curr).norm() < setting_.SIDEWALK_MAX_LENGTH)
+            //{
+                //transformed_landmark.push_back(start_point);
+                //continue;
+            //}
             
-            // Discontinued Curb
-            // Left: Road | Right: Sidewalk
-            double azimuth_diff_next = std::atan2(start_next(1), start_next(0)) -
-                                       std::atan2(end_curr(1), end_curr(0));
-            v_a = (end_next - start_next).head(2); // Road
-            v_b = (end_curr - start_next).head(2); // Curb 
-            angle_road_curb = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
-            if (azimuth_diff_next < setting_.DISCONTINUITY_AZIMUTH &&
-                end_curr(2) - start_next(2) > setting_.CURB_HEIGHT_THRESHOLD &&
-                angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
-                start_next.norm() > end_curr.norm() &&
-                (start_curr - end_curr).norm() > setting_.SIDEWALK_MIN_LENGTH &&
-                (start_curr - end_curr).norm() < setting_.SIDEWALK_MAX_LENGTH)
-            {
-                transformed_landmark.push_back(end_point);
-                continue;
-            }
+            //// Discontinued Curb
+            //// Left: Road | Right: Sidewalk
+            //double azimuth_diff_next = std::atan2(start_next(1), start_next(0)) -
+                                       //std::atan2(end_curr(1), end_curr(0));
+            //v_a = (end_next - start_next).head(2); // Road
+            //v_b = (end_curr - start_next).head(2); // Curb 
+            //angle_road_curb = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
+            //if (azimuth_diff_next < setting_.DISCONTINUITY_AZIMUTH &&
+                //end_curr(2) - start_next(2) > setting_.CURB_HEIGHT_THRESHOLD &&
+                //angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
+                //start_next.norm() > end_curr.norm() &&
+                //(start_curr - end_curr).norm() > setting_.SIDEWALK_MIN_LENGTH &&
+                //(start_curr - end_curr).norm() < setting_.SIDEWALK_MAX_LENGTH)
+            //{
+                //transformed_landmark.push_back(end_point);
+                //continue;
+            //}
            
-            // Continued Curb
-            // Left: Sidewalk | Center: Curb | Right: Road
-            v_a = (start_prev - end_prev).head(2); // Road
-            v_b = (end_curr - start_curr).head(2); // Curb
-            angle_road_curb = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
-            if (azimuth_diff_prev < setting_.DISCONTINUITY_AZIMUTH &&
-                azimuth_diff_next < setting_.DISCONTINUITY_DISTANCE &&
-                end_curr(2) - start_curr(2) > setting_.CURB_HEIGHT_THRESHOLD &&
-                end_curr(2) - end_prev(2) > setting_.CURB_HEIGHT_THRESHOLD &&
-                angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
-                start_curr.norm() > end_curr.norm() &&
-                (start_curr - end_prev).norm() < setting_.DISCONTINUITY_DISTANCE &&
+            //// Continued Curb
+            //// Left: Sidewalk | Center: Curb | Right: Road
+            //v_a = (start_prev - end_prev).head(2); // Road
+            //v_b = (end_curr - start_curr).head(2); // Curb
+            //angle_road_curb = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
+            //if (azimuth_diff_prev < setting_.DISCONTINUITY_AZIMUTH &&
+                //azimuth_diff_next < setting_.DISCONTINUITY_DISTANCE &&
+                //end_curr(2) - start_curr(2) > setting_.CURB_HEIGHT_THRESHOLD &&
+                //end_curr(2) - end_prev(2) > setting_.CURB_HEIGHT_THRESHOLD &&
+                //angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
+                //start_curr.norm() > end_curr.norm() &&
+                //(start_curr - end_prev).norm() < setting_.DISCONTINUITY_DISTANCE &&
+                ////(end_curr - start_next).norm() < setting_.DISCONTINUITY_DISTANCE &&
+                //(start_next - end_next).norm() > setting_.SIDEWALK_MIN_LENGTH &&
+                //(start_next - end_next).norm() < setting_.SIDEWALK_MAX_LENGTH)
+            //{
+                //transformed_landmark.push_back(start_point);
+                //continue;
+            //}
+
+            //// Continued Curb
+            //// Left: Road | Center: Curb | Right: Sidewalk
+            //v_a = (end_next - start_next).head(2); // Road
+            //v_b = (start_curr - end_curr).head(2); // Curb
+            //angle_road_curb = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
+            //if (azimuth_diff_next < setting_.DISCONTINUITY_AZIMUTH &&
+                //azimuth_diff_prev < setting_.DISCONTINUITY_AZIMUTH &&
+                //start_curr(2) - end_curr(2) > setting_.CURB_HEIGHT_THRESHOLD &&
+                //start_curr(2) - start_next(2) > setting_.CURB_HEIGHT_THRESHOLD &&
+                //angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
+                //end_curr.norm() > start_curr.norm() &&
                 //(end_curr - start_next).norm() < setting_.DISCONTINUITY_DISTANCE &&
-                (start_next - end_next).norm() > setting_.SIDEWALK_MIN_LENGTH &&
-                (start_next - end_next).norm() < setting_.SIDEWALK_MAX_LENGTH)
-            {
-                transformed_landmark.push_back(start_point);
-                continue;
-            }
+                //(start_curr - end_prev).norm() < setting_.DISCONTINUITY_DISTANCE &&
+                //(end_prev - start_prev).norm() > setting_.SIDEWALK_MIN_LENGTH &&
+                //(end_prev - start_prev).norm() < setting_.SIDEWALK_MAX_LENGTH)
+            //{
+                //transformed_landmark.push_back(end_point);
+                //continue;
+            //}
+        //}
+    //}
 
-            // Continued Curb
-            // Left: Road | Center: Curb | Right: Sidewalk
-            v_a = (end_next - start_next).head(2); // Road
-            v_b = (start_curr - end_curr).head(2); // Curb
-            angle_road_curb = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
-            if (azimuth_diff_next < setting_.DISCONTINUITY_AZIMUTH &&
-                azimuth_diff_prev < setting_.DISCONTINUITY_AZIMUTH &&
-                start_curr(2) - end_curr(2) > setting_.CURB_HEIGHT_THRESHOLD &&
-                start_curr(2) - start_next(2) > setting_.CURB_HEIGHT_THRESHOLD &&
-                angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
-                end_curr.norm() > start_curr.norm() &&
-                (end_curr - start_next).norm() < setting_.DISCONTINUITY_DISTANCE &&
-                (start_curr - end_prev).norm() < setting_.DISCONTINUITY_DISTANCE &&
-                (end_prev - start_prev).norm() > setting_.SIDEWALK_MIN_LENGTH &&
-                (end_prev - start_prev).norm() < setting_.SIDEWALK_MAX_LENGTH)
-            {
-                transformed_landmark.push_back(end_point);
-                continue;
-            }
-        }
-    }
-
-    // Restoration
-    landmark_.clear();
-    pcl::transformPointCloud(transformed_landmark, landmark_, transformation_.transpose());
-}
+    //// Restoration
+    //landmark_.clear();
+    //pcl::transformPointCloud(transformed_landmark, landmark_, transformation_.transpose());
+//}
 
 void FeatureExtractor::estimateRoadModel_()
 {
@@ -1033,25 +1097,81 @@ void FeatureExtractor::executeBresenhamLine(
     }
 }
 
-void FeatureExtractor::executeDouglasPeucker(
-    pcl::PointCloud<pcl::PointXYZ>& points,
-    pcl::PointCloud<pcl::PointXYZ>& out_points,
-    double epsilon)
+template <class PointT>
+void FeatureExtractor::fitPointCloud_(const pcl::PointCloud<PointT>& in_ring,
+                                      std::vector<PointT>& out_line_list)
 {
-    out_points.clear();
+    out_line_list.clear();
 
-    double dmax = 0;
-    double index = 0;
-
-    for (int i = 1; i < (int)endpoints.size() - 1; ++i)
+    int ring_size = in_ring.size();
+    if (ring_size < 2)
     {
-        double distance = 
+        return;
+    }
+    
+    auto start_iter = in_ring.begin();
+    for (auto it = in_ring.begin(); std::next(it) != in_ring.end(); ++it)
+    {
+        Eigen::Vector3f point_curr = (*it).getVector3fMap();
+        Eigen::Vector3f point_next = (*(it + 1)).getVector3fMap();
+        
+        double distance_diff = (point_curr - point_next).norm();
+
+        // Execute Douglas-Peucker for each cluster
+        if (distance_diff > setting_.DISCONTINUITY_DISTANCE ||
+            std::next(it, 2) == in_ring.end())
+        {
+            // Skip cluster less than 3 points
+            if (std::distance(start_iter, it) < 2)
+            {
+                start_iter = it + 1;
+                continue;
+            }
+
+            // Execute Douglas-Peucker Fitting Algorithm
+            auto fitted_line = douglasPeucker<PointT>(start_iter, it,
+                                                      setting_.EPSILON);
+            
+            // Save Line Segment
+            for (int i = 0; i < (int)fitted_line.size() - 1; ++i)
+            {
+                out_line_list.push_back(fitted_line[i]);
+                out_line_list.push_back(fitted_line[i + 1]);
+            }
+
+            start_iter = it + 1;
+        }
+    }
+}
+
+template <class PointT>
+bool FeatureExtractor::checkIsGroundLine_(const PointT& line_end_1,
+                                          const PointT& line_end_2)
+{
+    double distance = (pcl::pointToPlaneDistance(line_end_1, base_coeff_) +
+                       pcl::pointToPlaneDistance(line_end_2, base_coeff_)) / 2;
+
+    if (distance > setting_.GROUND_DIST_THRESHOLD)
+    {
+        return false;
     }
 
-    if (dmax > epsilon)
-    {
-        pcl::PointCloud<pcl::PointXYZ> recursive_results_1;
-        pcl::PointCloud<pcl::PointXYZ> recursive_results_2;
-        executeDouglasPeucker()
-    }
+    // Estimated Ground Line by projecting ray on Base
+    Eigen::Vector3f end_1 = line_end_1.getVector3fMap();
+    Eigen::Vector3f end_2 = line_end_2.getVector3fMap();
+
+    Eigen::Vector3f estimated_ground_end_1 = -end_1 * base_coeff_(3) /
+                                             (end_1.dot(base_coeff_.head(3)));
+    Eigen::Vector3f estimated_ground_end_2 = -end_2 * base_coeff_(3) /
+                                             (end_2.dot(base_coeff_.head(3)));
+
+    Eigen::Vector3f line_vec = end_1 - end_2;
+    Eigen::Vector3f estimated_ground_line_vec = estimated_ground_end_1 -
+                                                estimated_ground_end_2;
+
+    double angle = std::acos(line_vec.dot(estimated_ground_line_vec) /
+                             line_vec.norm() / estimated_ground_line_vec.norm());
+   
+    // Check Angle between Real Line and Estimated Line
+    return angle < setting_.GROUND_ANGLE_THRESHOLD;
 }
