@@ -72,6 +72,7 @@ public:
 
     std::vector<pcl::PointXYZ> getFittedLines();
     std::vector<pcl::PointXYZ> getGroundLines();
+    std::vector<pcl::PointXYZ> getGridNormals();
 
     std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ>> getBottomBeam();
     std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ>> getTopBeam();
@@ -99,6 +100,9 @@ private:
 
     // Occupancy Grid (Transformed)
     std::vector<std::vector<int>> grid_ground_;
+
+    // Normal Vector for visualization
+    std::vector<pcl::PointXYZ> grid_normals_;
 
     // Ground and Obstacles (Results from Ground Extraction)
     std::array<pcl::PointCloud<pcl::PointXYZ>, RING_NUMBER> ground_;

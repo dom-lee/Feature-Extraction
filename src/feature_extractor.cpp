@@ -45,16 +45,32 @@ void FeatureExtractor::setInputCloud(
     // Sort Point Cloud and Fit Line
     for (int i = 0; i < RING_NUMBER; ++i)
     {
+        // Transform PointCloud based on Base Plane
+        pcl::transformPointCloud(rings[i], transformed_rings_[i], transformation_);
+
+        //// Filter Ground and Ceiling
+        //pcl::PassThrough<pcl::PointXYZ> pcl_passthrough;
+        //pcl::PointCloud<pcl::PointXYZ> filtered_cloud;
+        //for (int i = 0; i < RING_NUMBER; ++i)
+        //{
+            //pcl_passthrough.setInputCloud(transformed_rings_[i].makeShared());
+            //pcl_passthrough.setFilterFieldName("z");
+            //pcl_passthrough.setFilterLimits(-estimated_lidar_height_ + 0.1,
+                                            //-estimated_lidar_height_ + 0.3);
+            //pcl_passthrough.filter(filtered_cloud);
+            //c_test_ += filtered_cloud;
+        //}
+
         // Sort Rings by azimuth
-        std::sort(rings[i].begin(), rings[i].end(),
+        std::sort(transformed_rings_[i].begin(), transformed_rings_[i].end(),
             [](const pcl::PointXYZ& lhs, const pcl::PointXYZ& rhs)
             {
                 return std::atan2(lhs.y, lhs.x) < std::atan2(rhs.y, rhs.x);
             }
         );
 
-        // Fitting PointCloud To Reduce Noise
-        fitPointCloud_(rings[i], fitted_lines_[i]);
+        //// Fitting PointCloud To Reduce Noise
+        //fitPointCloud_(rings[i], fitted_lines_[i]);
     }
 
     debugger::debugColorTextOutput("Finish SetInputCloud", 1, BG);
@@ -125,6 +141,11 @@ std::vector<pcl::PointXYZ> FeatureExtractor::getFittedLines()
 std::vector<pcl::PointXYZ> FeatureExtractor::getGroundLines()
 {
     return ground_lines_;
+}
+
+std::vector<pcl::PointXYZ> FeatureExtractor::getGridNormals()
+{
+    return grid_normals_;
 }
 
 std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ>> FeatureExtractor::getBottomBeam()
@@ -290,61 +311,192 @@ bool FeatureExtractor::estimateBasePlane_(
 
 void FeatureExtractor::extractWall_()
 {
-    ground_lines_.clear();
-    for (int i = 0; i < fitted_lines_.size(); ++i)
+
+    // Grid Specification (Grid size is odd)
+    double grid_length = setting_.GRID_LENGTH;
+    int grid_size = 2 * setting_.GRID_RANGE + 1;
+    double max_distance = grid_length * (setting_.GRID_RANGE + 0.5);
+
+    // Index of Center Grid
+    int center_m = setting_.GRID_RANGE;
+    int center_n = setting_.GRID_RANGE;
+
+    // {min_height, max_height} for grid
+    std::vector<std::vector<double>> grid_min_z(grid_size,
+        std::vector<double>(grid_size, INFINITY));
+    std::vector<std::vector<double>> grid_max_z(grid_size,
+        std::vector<double>(grid_size, -INFINITY));
+
+    // Transformed PointCloud in Grid
+    std::vector<std::vector<pcl::PointCloud<pcl::PointXYZ>>> grid_cloud(grid_size,
+        std::vector<pcl::PointCloud<pcl::PointXYZ>>(grid_size));
+
+    // Save PointCloud into Grid
+    for (int i = 0; i < RING_NUMBER; ++i)
     {
-        for (int j = 0; j < (int)fitted_lines_[i].size() / 2; ++j)
+        for (int j = 0; j < transformed_rings_[i].size(); ++j)
         {
-            if (checkIsGroundLine_(fitted_lines_[i][2 * j],
-                                   fitted_lines_[i][2 * j + 1]))
+            pcl::PointXYZ& point = transformed_rings_[i][j];
+
+            // Filter outside range
+            if ((point.x < 0 && point.x > -2.0 && std::abs(point.y) < 0.5) ||
+                std::abs(point.x) >= max_distance || 
+                std::abs(point.y) >= max_distance)
             {
-                ground_lines_.push_back(fitted_lines_[i][2 * j]);
-                ground_lines_.push_back(fitted_lines_[i][2 * j + 1]);
+                continue;
             }
-
-        }
-        
-    }
-
-    // Interpolate Fitted Lines by azimuth
-    double resolution = 2.0 * M_PI / (double)setting_.SECTION_NUMBER;
-
-    std::vector<std::vector<pcl::PointXYZ>> interpolated_fitted_lines(
-        fitted_lines_.size(), std::vector<pcl::PointXYZ>(setting_.SECTION_NUMBER));
-    for (int i = 0; i < fitted_lines_.size(); ++i)
-    {
-        for (int j = 0; j < (int)fitted_lines_[i].size() / 2; ++j)
-        {
-            double x1 = fitted_lines_[i][2 * j].x;
-            double y1 = fitted_lines_[i][2 * j].y;
-            double z1 = fitted_lines_[i][2 * j].z;
-            double x2 = fitted_lines_[i][2 * j + 1].x;
-            double y2 = fitted_lines_[i][2 * j + 1].y;
-            double z2 = fitted_lines_[i][2 * j + 1].z;
-
-            double azimuth_start = std::atan2(y1, x1);
-            double azimuth_end   = std::atan2(y2, x2);
             
-            int start_idx = std::ceil((azimuth_start + M_PI) / resolution);
-            int end_idx   = std::floor((azimuth_end + M_PI) / resolution);
 
-            for (int k = start_idx; k < end_idx + 1; ++k)
+            // Visualization
+            if (point.z < -estimated_lidar_height_ + 0.2 &&
+                point.z > -estimated_lidar_height_ - 0.2)
             {
-                double azimuth = k * resolution - M_PI;
-                double r = (y1 * x2 - x1 * y2) /
-                           ((y1 - y2) * std::cos(azimuth) - 
-                            (x1 - x2) * std::sin(azimuth));
-                
-                pcl::PointXYZ interpolated_point;
-                interpolated_point.x = r * std::cos(azimuth);
-                interpolated_point.y = r * std::sin(azimuth);
-                interpolated_point.z = z1 + (z1 - z2) / (x1 - x2) *
-                                       (interpolated_point.x - x1);
-
-                a_test_.push_back(interpolated_point);
+                c_test_.push_back(point);
             }
+            // Visualization
+
+            // Filter Ground and Ceiling
+            if (point.z < -estimated_lidar_height_ + 0.2 ||
+                point.z > -estimated_lidar_height_ + 1.5)
+            {
+                continue;
+            }
+            a_test_.push_back(point);
+
+            // Index of Grid 
+            int m = center_m + (point.x + grid_length / 2) / grid_length;
+            int n = center_n + (point.y + grid_length / 2) / grid_length;
+
+            // Update Min/Max Height
+            grid_min_z[m][n] = std::min((double)point.z, grid_min_z[m][n]);
+            grid_max_z[m][n] = std::max((double)point.z, grid_max_z[m][n]);
+
+            grid_cloud[m][n].push_back(point);
         }
     }
+
+    grid_normals_.clear();
+    std::vector<std::vector<Eigen::Vector3f>> grid_normal(grid_size,
+        std::vector<Eigen::Vector3f>(grid_size, {0, 0, 0}));
+    // Compute PCA for each grid and get Normal Vector
+    for (int m = 0; m < grid_size; ++m)
+    {
+        for (int n = 0; n < grid_size; ++n)
+        {
+            // Filter Grid when not enough points
+            if (grid_cloud[m][n].size() < 3 ||
+                grid_max_z[m][n] - grid_min_z[m][n] < setting_.WALL_HEIGHT_THRESHOLD)
+            {
+                continue;
+            }
+
+            // Execute PCA for each grid
+            pcl::PCA<pcl::PointXYZ> pca;
+            pca.setInputCloud(grid_cloud[m][n].makeShared());
+            Eigen::Vector3f normal_vector = pca.getEigenVectors().col(2);
+            if (std::abs(normal_vector(2)) > 0.05)
+            {
+                continue;
+            }
+            grid_normal[m][n] = normal_vector;
+
+            // For Visualization
+            Eigen::Vector4f pca_mean = pca.getMean();
+            pcl::PointXYZ point_mean(pca_mean(0), pca_mean(1), pca_mean(2));
+            grid_normals_.push_back(point_mean);
+            pcl::PointXYZ point_normal = point_mean;
+            point_normal.x += normal_vector(0) * grid_length;
+            point_normal.y += normal_vector(1) * grid_length;
+            point_normal.z += normal_vector(2) * grid_length;
+            grid_normals_.push_back(point_normal);
+            // End Visualization
+        }
+    }
+
+    // Clustering by DFS (with checking normal)
+    std::vector<std::vector<Eigen::Vector3f>> grid_visited(grid_size,
+        std::vector<Eigen::Vector3f>(grid_size, {0, 0, 0}));
+    pcl::PointCloud<pcl::PointXYZ> cluster;
+    for (int m = 0; m < grid_size; ++m)
+    {
+        for (int n = 0; n < grid_size; ++n)
+        {
+            if (grid_normal[m][n].isZero(0))
+            {
+                continue;
+            }
+            
+
+
+
+
+
+
+
+
+            pcl::PointXYZ point;
+            point.x = (m - center_m) * grid_length;
+            point.y = (n - center_n) * grid_length;
+            point.z = 0;
+            b_test_.push_back(point);
+        }
+    }
+
+    //ground_lines_.clear();
+    //for (int i = 0; i < fitted_lines_.size(); ++i)
+    //{
+        //for (int j = 0; j < (int)fitted_lines_[i].size() / 2; ++j)
+        //{
+            //if (checkIsGroundLine_(fitted_lines_[i][2 * j],
+                                   //fitted_lines_[i][2 * j + 1]))
+            //{
+                //ground_lines_.push_back(fitted_lines_[i][2 * j]);
+                //ground_lines_.push_back(fitted_lines_[i][2 * j + 1]);
+            //}
+
+        //}
+        
+    //}
+
+    //// Interpolate Fitted Lines by azimuth
+    //double resolution = 2.0 * M_PI / (double)setting_.SECTION_NUMBER;
+
+    //std::vector<std::vector<pcl::PointXYZ>> interpolated_fitted_lines(
+        //fitted_lines_.size(), std::vector<pcl::PointXYZ>(setting_.SECTION_NUMBER));
+    //for (int i = 0; i < fitted_lines_.size(); ++i)
+    //{
+        //for (int j = 0; j < (int)fitted_lines_[i].size() / 2; ++j)
+        //{
+            //double x1 = fitted_lines_[i][2 * j].x;
+            //double y1 = fitted_lines_[i][2 * j].y;
+            //double z1 = fitted_lines_[i][2 * j].z;
+            //double x2 = fitted_lines_[i][2 * j + 1].x;
+            //double y2 = fitted_lines_[i][2 * j + 1].y;
+            //double z2 = fitted_lines_[i][2 * j + 1].z;
+
+            //double azimuth_start = std::atan2(y1, x1);
+            //double azimuth_end   = std::atan2(y2, x2);
+            
+            //int start_idx = std::ceil((azimuth_start + M_PI) / resolution);
+            //int end_idx   = std::floor((azimuth_end + M_PI) / resolution);
+
+            //for (int k = start_idx; k < end_idx + 1; ++k)
+            //{
+                //double azimuth = k * resolution - M_PI;
+                //double r = (y1 * x2 - x1 * y2) /
+                           //((y1 - y2) * std::cos(azimuth) - 
+                            //(x1 - x2) * std::sin(azimuth));
+                
+                //pcl::PointXYZ interpolated_point;
+                //interpolated_point.x = r * std::cos(azimuth);
+                //interpolated_point.y = r * std::sin(azimuth);
+                //interpolated_point.z = z1 + (z1 - z2) / (x1 - x2) *
+                                       //(interpolated_point.x - x1);
+
+                //a_test_.push_back(interpolated_point);
+            //}
+        //}
+    //}
 
     //// Filter Wall by Check Mesh
     //for (int i = 0; i < (int)fitted_lines_.size() - 1; ++i)

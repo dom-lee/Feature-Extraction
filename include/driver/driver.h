@@ -47,6 +47,7 @@
 #include "utils/debugger.h"
 #include "utils/ros_utils.h"
 #include "utils/utils.h"
+#include "utils/timing.h"
 
 static const int VELODYNE_RING_NUMBER = 32;
 
@@ -80,6 +81,7 @@ private:
     ros::Publisher b_pub_;
     ros::Publisher c_pub_;
 
+    ros::Publisher grid_normals_pub_;
     ros::Publisher fitted_lines_pub_;
     ros::Publisher ground_lines_pub_;
     ros::Publisher bottom_beam_pub_;

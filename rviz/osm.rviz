@@ -41,7 +41,7 @@ Visualization Manager:
   Class: ""
   Displays:
     - Alpha: 0.5
-      Cell Size: 0.10000000149011612
+      Cell Size: 0.5
       Class: rviz/Grid
       Color: 160; 160; 164
       Enabled: true
@@ -235,7 +235,7 @@ Visualization Manager:
       Axis: Z
       Channel Name: intensity
       Class: rviz/PointCloud2
-      Color: 239; 41; 41
+      Color: 138; 226; 52
       Color Transformer: FlatColor
       Decay Time: 0
       Enabled: true
@@ -303,7 +303,7 @@ Visualization Manager:
       Marker Topic: /feature_extraction/fitted_lines
       Name: Marker
       Namespaces:
-        fitted lines: true
+        {}
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
@@ -312,6 +312,14 @@ Visualization Manager:
       Name: Marker
       Namespaces:
         {}
+      Queue Size: 100
+      Value: true
+    - Class: rviz/Marker
+      Enabled: true
+      Marker Topic: /feature_extraction/grid_normals
+      Name: Marker
+      Namespaces:
+        grid_normals: true
       Queue Size: 100
       Value: true
   Enabled: true
@@ -341,26 +349,20 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Class: rviz/XYOrbit
-      Distance: 14.694732666015625
+      Angle: -1.7299994230270386
+      Class: rviz/TopDownOrtho
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
-      Field of View: 0.7853981852531433
-      Focal Point:
-        X: 7.8687744140625
-        Y: -1.1981092691421509
-        Z: 2.8908034437336028e-06
-      Focal Shape Fixed Size: true
-      Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.124796986579895
+      Scale: 60.257713317871094
       Target Frame: <Fixed Frame>
-      Yaw: 3.0253944396972656
+      X: -2.4504103660583496
+      Y: 1.3784738779067993
     Saved: ~
 Window Geometry:
   Displays:

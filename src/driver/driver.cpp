@@ -43,6 +43,8 @@ Driver::Driver(ros::NodeHandle& nh)
     bottom_beam_pub_ = nh_.advertise<visualization_msgs::Marker>("bottom_beam", 1, true);
     top_beam_pub_    = nh_.advertise<visualization_msgs::Marker>("top_beam", 1, true);
 
+    grid_normals_pub_ = nh_.advertise<visualization_msgs::Marker>("grid_normals", 1, true);
+
     fitted_lines_pub_ = nh_.advertise<visualization_msgs::Marker>("fitted_lines", 1, true);
     ground_lines_pub_ = nh_.advertise<visualization_msgs::Marker>("ground_lines", 1, true);
 
@@ -75,8 +77,13 @@ Driver::Driver(ros::NodeHandle& nh)
                 is_extractor_setting_changed_ = false;
             }
 
+            std::chrono::steady_clock::time_point start_time = timing::getCurrentTime();
+
             feature_extractor.setInputCloud(rings_);
             feature_extractor.run();
+
+            ROS_INFO("%f", timing::spendElapsedTime(start_time));
+
 
             //publishPointCloud_<pcl::PointXYZ>(ground_pub_,
                                               //feature_extractor.getGround());
@@ -89,10 +96,12 @@ Driver::Driver(ros::NodeHandle& nh)
             publishPointCloud_<pcl::PointXYZ>(b_pub_, feature_extractor.getB());
             publishPointCloud_<pcl::PointXYZ>(c_pub_, feature_extractor.getC());
 
-            visualizeLines_(fitted_lines_pub_, 1, "fitted lines",
-                            1.0f, 1.0f, 1.0f, feature_extractor.getFittedLines());
-            visualizeLines_(ground_lines_pub_, 1, "ground lines",
-                            0.0f, 1.0f, 0.0f, feature_extractor.getGroundLines());
+            visualizeLines_(grid_normals_pub_, 1, "grid_normals",
+                            1.0f, 0.0f, 1.0f, feature_extractor.getGridNormals());
+            //visualizeLines_(fitted_lines_pub_, 1, "fitted lines",
+                            //1.0f, 1.0f, 1.0f, feature_extractor.getFittedLines());
+            //visualizeLines_(ground_lines_pub_, 1, "ground lines",
+                            //0.0f, 1.0f, 0.0f, feature_extractor.getGroundLines());
             //visualizeLines_(bottom_beam_pub_, 1, "bottom beam", 1.0f, 0.0f, 1.0f,
                            //feature_extractor.getBottomBeam());
             //visualizeLines_(top_beam_pub_, 1, "top beam", 0.0f, 1.0f, 1.0f,
@@ -240,7 +249,7 @@ void Driver::visualizeLines_(ros::Publisher& publisher,
     line_list.action = visualization_msgs::Marker::ADD;
     line_list.pose.orientation.w = 1.0;
 
-    line_list.scale.x = 0.1;
+    line_list.scale.x = 0.01;
     
     line_list.color.r = r;
     line_list.color.g = g;
