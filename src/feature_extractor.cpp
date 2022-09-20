@@ -32,6 +32,7 @@ void FeatureExtractor::changeSetting(feature_extractor_setting_t setting)
 void FeatureExtractor::setInputCloud(
     std::array<pcl::PointCloud<pcl::PointXYZ>, RING_NUMBER>& rings)
 {
+    landmark_.clear();
     a_test_.clear();
     b_test_.clear();
     c_test_.clear();
@@ -48,19 +49,6 @@ void FeatureExtractor::setInputCloud(
         // Transform PointCloud based on Base Plane
         pcl::transformPointCloud(rings[i], transformed_rings_[i], transformation_);
 
-        //// Filter Ground and Ceiling
-        //pcl::PassThrough<pcl::PointXYZ> pcl_passthrough;
-        //pcl::PointCloud<pcl::PointXYZ> filtered_cloud;
-        //for (int i = 0; i < RING_NUMBER; ++i)
-        //{
-            //pcl_passthrough.setInputCloud(transformed_rings_[i].makeShared());
-            //pcl_passthrough.setFilterFieldName("z");
-            //pcl_passthrough.setFilterLimits(-estimated_lidar_height_ + 0.1,
-                                            //-estimated_lidar_height_ + 0.3);
-            //pcl_passthrough.filter(filtered_cloud);
-            //c_test_ += filtered_cloud;
-        //}
-
         // Sort Rings by azimuth
         std::sort(transformed_rings_[i].begin(), transformed_rings_[i].end(),
             [](const pcl::PointXYZ& lhs, const pcl::PointXYZ& rhs)
@@ -68,9 +56,6 @@ void FeatureExtractor::setInputCloud(
                 return std::atan2(lhs.y, lhs.x) < std::atan2(rhs.y, rhs.x);
             }
         );
-
-        //// Fitting PointCloud To Reduce Noise
-        //fitPointCloud_(rings[i], fitted_lines_[i]);
     }
 
     debugger::debugColorTextOutput("Finish SetInputCloud", 1, BG);
@@ -145,7 +130,28 @@ std::vector<pcl::PointXYZ> FeatureExtractor::getGroundLines()
 
 std::vector<pcl::PointXYZ> FeatureExtractor::getGridNormals()
 {
-    return grid_normals_;
+    std::vector<pcl::PointXYZ> normal_vectors;
+
+    for (int m = 0; m < grid_normals_.size(); ++m)
+    {
+        for (int n = 0; n < grid_normals_[m].size(); ++n)
+        {
+            Eigen::Vector3f& normal_vector = grid_normals_[m][n];
+            if (normal_vector.isZero(0))
+            {
+                continue;
+            }
+
+            normal_vectors.push_back(grid_centroid_[m][n]);
+
+            pcl::PointXYZ point_normal = grid_centroid_[m][n];
+            point_normal.x += normal_vector(0) * setting_.GRID_LENGTH;
+            point_normal.y += normal_vector(1) * setting_.GRID_LENGTH;
+            point_normal.z += normal_vector(2) * setting_.GRID_LENGTH;
+            normal_vectors.push_back(point_normal);
+        }
+    }
+    return normal_vectors;
 }
 
 std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ>> FeatureExtractor::getBottomBeam()
@@ -272,8 +278,10 @@ bool FeatureExtractor::estimateBasePlane_(
     }
 
     // Set Base Planar Model (ax + by + cz + d = 0)
+    pcl::PointIndices inliers;
     auto tmp_base_coeff = estimatePlaneRANSAC(base_candidate,
-                                              setting_.BASE_FIT_THRESHOLD);
+                                              setting_.BASE_FIT_THRESHOLD,
+                                              inliers);
     debugger::debugColorOutput("Base Coefficients \n", tmp_base_coeff, 3, BG); 
 
     // Sanity Check for Vertical Base Planar
@@ -294,9 +302,10 @@ bool FeatureExtractor::estimateBasePlane_(
     // | 0  c -b |
     // | a  b  c | 
     transformation_ = Eigen::Matrix4f::Identity(4, 4);
-    transformation_.block<3, 3>(0, 0) << base_coeff_(2), 0,              -base_coeff_(0),
-                                         0,              base_coeff_(2), -base_coeff_(1),
-                                         base_coeff_(0), base_coeff_(1), base_coeff_(2);
+    transformation_.block<3, 3>(0, 0) <<
+        base_coeff_(2), 0,              -base_coeff_(0),
+        0,              base_coeff_(2), -base_coeff_(1),
+        base_coeff_(0), base_coeff_(1), base_coeff_(2);
     transformation_.rowwise().normalize();
 
     debugger::debugColorOutput("Transformation \n", transformation_, 3, BB); 
@@ -311,7 +320,6 @@ bool FeatureExtractor::estimateBasePlane_(
 
 void FeatureExtractor::extractWall_()
 {
-
     // Grid Specification (Grid size is odd)
     double grid_length = setting_.GRID_LENGTH;
     int grid_size = 2 * setting_.GRID_RANGE + 1;
@@ -327,9 +335,17 @@ void FeatureExtractor::extractWall_()
     std::vector<std::vector<double>> grid_max_z(grid_size,
         std::vector<double>(grid_size, -INFINITY));
 
-    // Transformed PointCloud in Grid
-    std::vector<std::vector<pcl::PointCloud<pcl::PointXYZ>>> grid_cloud(grid_size,
-        std::vector<pcl::PointCloud<pcl::PointXYZ>>(grid_size));
+    // Clear Transformed PointCloud in Grid
+    grid_cloud_.clear();
+    grid_cloud_.resize(grid_size,
+                       std::vector<pcl::PointCloud<pcl::PointXYZ>>(grid_size));
+    for (int m = 0; m < grid_size; ++m)
+    {
+        for (int n = 0; n < grid_size; ++n)
+        {
+            grid_cloud_[m][n].clear();
+        }
+    }
 
     // Save PointCloud into Grid
     for (int i = 0; i < RING_NUMBER; ++i)
@@ -347,7 +363,7 @@ void FeatureExtractor::extractWall_()
             }
             
 
-            // Visualization
+            // Visualization for Ground
             if (point.z < -estimated_lidar_height_ + 0.2 &&
                 point.z > -estimated_lidar_height_ - 0.2)
             {
@@ -371,74 +387,85 @@ void FeatureExtractor::extractWall_()
             grid_min_z[m][n] = std::min((double)point.z, grid_min_z[m][n]);
             grid_max_z[m][n] = std::max((double)point.z, grid_max_z[m][n]);
 
-            grid_cloud[m][n].push_back(point);
+            grid_cloud_[m][n].push_back(point);
         }
     }
 
+    // Resize and Clear
     grid_normals_.clear();
-    std::vector<std::vector<Eigen::Vector3f>> grid_normal(grid_size,
-        std::vector<Eigen::Vector3f>(grid_size, {0, 0, 0}));
+    grid_normals_.resize(grid_size,
+                         std::vector<Eigen::Vector3f>(grid_size, {0, 0, 0}));
+    grid_centroid_.clear();
+    grid_centroid_.resize(grid_size,
+                          std::vector<pcl::PointXYZ>(grid_size, {0, 0, 0}));
+
     // Compute PCA for each grid and get Normal Vector
     for (int m = 0; m < grid_size; ++m)
     {
         for (int n = 0; n < grid_size; ++n)
         {
             // Filter Grid when not enough points
-            if (grid_cloud[m][n].size() < 3 ||
+            if (grid_cloud_[m][n].size() < 3 ||
                 grid_max_z[m][n] - grid_min_z[m][n] < setting_.WALL_HEIGHT_THRESHOLD)
             {
                 continue;
             }
 
-            // Execute PCA for each grid
-            pcl::PCA<pcl::PointXYZ> pca;
-            pca.setInputCloud(grid_cloud[m][n].makeShared());
-            Eigen::Vector3f normal_vector = pca.getEigenVectors().col(2);
-            if (std::abs(normal_vector(2)) > 0.05)
+            //// Execute PCA for each grid
+            //pcl::PCA<pcl::PointXYZ> pca;
+            //pca.setInputCloud(grid_cloud_[m][n].makeShared());
+            //Eigen::Vector3f normal_vector = pca.getEigenVectors().col(2);
+            pcl::PointIndices inliers;
+            auto wall_coeff = estimatePlaneRANSAC(grid_cloud_[m][n],
+                                                  setting_.WALL_FIT_THRESHOLD,
+                                                  inliers);
+            Eigen::Vector3f normal_vector = wall_coeff.head(3);
+            
+            // Filter Normal Vector which is not perpendicular to the ground
+            if (std::abs(normal_vector(2)) > 0.1)
             {
                 continue;
             }
-            grid_normal[m][n] = normal_vector;
-
-            // For Visualization
-            Eigen::Vector4f pca_mean = pca.getMean();
-            pcl::PointXYZ point_mean(pca_mean(0), pca_mean(1), pca_mean(2));
-            grid_normals_.push_back(point_mean);
-            pcl::PointXYZ point_normal = point_mean;
-            point_normal.x += normal_vector(0) * grid_length;
-            point_normal.y += normal_vector(1) * grid_length;
-            point_normal.z += normal_vector(2) * grid_length;
-            grid_normals_.push_back(point_normal);
-            // End Visualization
+            grid_normals_[m][n] = normal_vector;
+            pcl::computeCentroid(grid_cloud_[m][n], inliers.indices,
+                                 grid_centroid_[m][n]);
         }
     }
 
     // Clustering by DFS (with checking normal)
-    std::vector<std::vector<Eigen::Vector3f>> grid_visited(grid_size,
-        std::vector<Eigen::Vector3f>(grid_size, {0, 0, 0}));
-    pcl::PointCloud<pcl::PointXYZ> cluster;
+    std::vector<std::vector<int>> grid_visited(grid_size,
+                                               std::vector<int>(grid_size, 0));
+    pcl::PointCloud<pcl::PointXYZ> transformed_cluster;
     for (int m = 0; m < grid_size; ++m)
     {
         for (int n = 0; n < grid_size; ++n)
         {
-            if (grid_normal[m][n].isZero(0))
+            // Skip Grid 
+            if (grid_normals_[m][n].isZero(0) ||
+                grid_visited[m][n] != 0)
             {
                 continue;
             }
+
+            clusterGridDFS_(grid_visited, m, n, m, n, transformed_cluster);
             
+            // Inverse Transform from transformed_cluster to cluster
+            pcl::PointCloud<pcl::PointXYZ> cluster;
+            pcl::transformPointCloud(transformed_cluster, cluster,
+                                     transformation_.inverse());
+            transformed_cluster.clear();
 
-
-
-
-
-
-
-
-            pcl::PointXYZ point;
-            point.x = (m - center_m) * grid_length;
-            point.y = (n - center_n) * grid_length;
-            point.z = 0;
-            b_test_.push_back(point);
+            // Estimate Wall Plane Coeff from Cluster
+            pcl::PointIndices inliers;
+            auto wall_coeff = estimatePlaneRANSAC(cluster,
+                                                  setting_.WALL_FIT_THRESHOLD,
+                                                  inliers);
+        
+            b_test_ = cluster;
+            
+            // Find EndPoints 
+            pcl::PointXYZ wall_end_point_1;
+            pcl::PointXYZ wall_end_point_2;
         }
     }
 
@@ -497,29 +524,96 @@ void FeatureExtractor::extractWall_()
             //}
         //}
     //}
+}
 
-    //// Filter Wall by Check Mesh
-    //for (int i = 0; i < (int)fitted_lines_.size() - 1; ++i)
-    //{
-        //for (int j = 0; j < setting_.SECTION_NUMBER; ++j)
-        //{
-            
-        //}
-    //}
+void FeatureExtractor::clusterGridDFS_(std::vector<std::vector<int>>& grid_visited,
+                                       int seed_m, int seed_n, int m, int n,
+                                       pcl::PointCloud<pcl::PointXYZ>& cluster)
+{
+    // Check for Seed
+    if (seed_m < 0 || seed_m >= grid_visited.size() ||
+        seed_n < 0 || seed_n >= grid_visited[0].size() ||
+        grid_normals_[seed_m][seed_n].isZero(0))
+    {
+        debugger::debugColorTextOutput("Check Seed Index", 5, BY);
+        return;
+    }
 
+    // Check for current grid_idx
+    if (m < 0 || m >= grid_visited.size() ||
+        n < 0 || n >= grid_visited[0].size() ||
+        grid_normals_[m][n].isZero(0))
+    {
+        return;
+    }
 
-    //pcl::PassThrough<pcl::PointXYZ> pcl_passthrough;
-    //pcl::PointCloud<pcl::PointXYZ> filtered_cloud;
-    //for (int i = 0; i < RING_NUMBER; ++i)
-    //{
-        //pcl_passthrough.setInputCloud(transformed_rings_[i].makeShared());
-        //pcl_passthrough.setFilterFieldName("z");
-        //pcl_passthrough.setFilterLimits(-estimated_lidar_height_ + 0.1,
-                                        //-estimated_lidar_height_ + 0.3);
-        //pcl_passthrough.filter(filtered_cloud);
-        //c_test_ += filtered_cloud;
-    //}
+    // Add point cloud into cluster
+    cluster += grid_cloud_[m][n];
+
+    // Exit for visited Grid
+    if (grid_visited[m][n] == 1)
+    {
+        return;
+    }
+
+    // Filter
+    Eigen::Vector3f& seed_normal = grid_normals_[seed_m][seed_n];
+    Eigen::Vector3f& current_normal = grid_normals_[m][n];
+
+    double cos_angle = seed_normal.dot(current_normal) /
+                       seed_normal.norm() / current_normal.norm();
+    cos_angle = (cos_angle > 1) ? 1 : cos_angle;
+    cos_angle = (cos_angle < -1) ? -1 : cos_angle;
+
+    double angle_diff = std::acos(cos_angle);
+
+    // Filter when there's a big difference in angle between normal vectors
+    if (angle_diff > setting_.CLUSTER_ANGLE_THRESHOLD)
+    {
+        return;
+    }
+
+    // Filter by distance from plane to centroid
+    Eigen::Vector3f centroid_diff = grid_centroid_[m][n].getVector3fMap() -
+                                    grid_centroid_[seed_m][seed_n].getVector3fMap();
+    double distance_diff = centroid_diff.dot(seed_normal) / seed_normal.norm();
+    if (distance_diff > setting_.CLUSTER_DIST_THRESHOLD)
+    {
+        return;
+    }
+   
+    // Mark as Visited
+    grid_visited[m][n] = 1;
+
+    // get neighbors that line(vertical to normal vector) pass
+    double start_x = grid_centroid_[m][n].x +
+                     setting_.GRID_LENGTH * grid_normals_[m][n](1);
+    double start_y = grid_centroid_[m][n].y - 
+                     setting_.GRID_LENGTH * grid_normals_[m][n](0);
+    double end_x   = grid_centroid_[m][n].x -
+                     setting_.GRID_LENGTH * grid_normals_[m][n](1);
+    double end_y   = grid_centroid_[m][n].y +
+                     setting_.GRID_LENGTH * grid_normals_[m][n](0);
     
+    std::vector<std::pair<int, int>> on_grid_idxs;
+    executeBresenhamLine(start_x, start_y, end_x, end_y,
+                         setting_.GRID_LENGTH, on_grid_idxs);
+
+    // Index of Center Grid
+    int center_m = setting_.GRID_RANGE;
+    int center_n = setting_.GRID_RANGE;
+
+    // DFS for Neighbors
+    for (auto& idx : on_grid_idxs)
+    {
+        if (center_m + idx.first == m && center_n + idx.second == n)
+        {
+            continue;
+        }
+
+        clusterGridDFS_(grid_visited, seed_m, seed_n,
+                        center_m + idx.first, center_n + idx.second, cluster);
+    }
 }
 
 void FeatureExtractor::extractGround_()

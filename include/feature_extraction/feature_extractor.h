@@ -27,10 +27,11 @@
 #include <pcl/point_types.h> // PointXYZ
 #include <pcl/common/distances.h> // euclideanDistance
 #include <pcl/common/transforms.h>
+#include <pcl/common/pca.h>
+#include <pcl/common/centroid.h>
 #include <pcl/ModelCoefficients.h>
 #include <pcl/sample_consensus/method_types.h>
 #include <pcl/sample_consensus/sac_model_plane.h>
-#include <pcl/common/pca.h>
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/filters/model_outlier_removal.h>
 #include <pcl/filters/passthrough.h>
@@ -101,8 +102,12 @@ private:
     // Occupancy Grid (Transformed)
     std::vector<std::vector<int>> grid_ground_;
 
-    // Normal Vector for visualization
-    std::vector<pcl::PointXYZ> grid_normals_;
+    // PointCloud(Ground Removed) for each grid cell
+    std::vector<std::vector<pcl::PointCloud<pcl::PointXYZ>>> grid_cloud_;
+
+    // Normal Vector and Mean XYZ for Grid
+    std::vector<std::vector<Eigen::Vector3f>> grid_normals_;
+    std::vector<std::vector<pcl::PointXYZ>> grid_centroid_;
 
     // Ground and Obstacles (Results from Ground Extraction)
     std::array<pcl::PointCloud<pcl::PointXYZ>, RING_NUMBER> ground_;
@@ -132,6 +137,11 @@ private:
 
     // Find Wall
     void extractWall_();
+
+    // Cluster Wall by checking Normal Vector in DFS way
+    void clusterGridDFS_(std::vector<std::vector<int>>& grid_visited,
+                         int seed_m, int seed_n, int m, int n,
+                         pcl::PointCloud<pcl::PointXYZ>& cluster);
 
     // Extract Ground and Find Obstacles with grid method
     void extractGround_();

@@ -19,6 +19,9 @@ typedef struct feature_extractor_setting
     // Parameters for Wall Extraction
     double SECTION_NUMBER;
     double WALL_HEIGHT_THRESHOLD;
+    double WALL_FIT_THRESHOLD;
+    double CLUSTER_ANGLE_THRESHOLD;
+    double CLUSTER_DIST_THRESHOLD;
 
     int    SMOOTH_WINDOW_SIZE;
     double SMOOTH_THRESHOLD;

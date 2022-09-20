@@ -25,7 +25,8 @@ using namespace bipedlab;
 
 template <class PointT>
 Eigen::Vector4f estimatePlaneRANSAC(const pcl::PointCloud<PointT>& cloud,
-                                    double plane_threshold)
+                                    double plane_threshold,
+                                    pcl::PointIndices& inliers)
 {
     Eigen::Vector4f plane_coeff;
 
@@ -38,12 +39,13 @@ Eigen::Vector4f estimatePlaneRANSAC(const pcl::PointCloud<PointT>& cloud,
     // Plane Model segmentation with RANSAC
     // https://pcl.readthedocs.io/en/latest/planar_segmentation.html
     pcl::ModelCoefficients plane_model_coeff; 
-    pcl::PointIndices inliers;
 
     // Create the segmentation object
     pcl::SACSegmentation<PointT> seg;
+
     // Optional
-    seg.setOptimizeCoefficients(true);
+    seg.setOptimizeCoefficients(false);
+
     // Mandatory
     seg.setModelType(pcl::SACMODEL_PLANE);
     seg.setMethodType(pcl::SAC_RANSAC);
@@ -60,6 +62,20 @@ Eigen::Vector4f estimatePlaneRANSAC(const pcl::PointCloud<PointT>& cloud,
 
     plane_coeff << plane_model_coeff.values[0], plane_model_coeff.values[1],
                    plane_model_coeff.values[2], plane_model_coeff.values[3];
+
+    // Optimization with suprressing Warning
+    if (inliers.indices.size() > 4)
+    {
+        typename pcl::SampleConsensusModel<PointT>::Ptr model = seg.getModel();
+
+        Eigen::VectorXf refined_plane_coeff; 
+        model->optimizeModelCoefficients(inliers.indices,
+                                         plane_coeff,
+                                         refined_plane_coeff);
+        plane_coeff = refined_plane_coeff.head(4);
+
+        model->selectWithinDistance(plane_coeff, plane_threshold, inliers.indices);
+    }
 
     return plane_coeff;
 }
