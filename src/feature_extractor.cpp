@@ -36,7 +36,6 @@ void FeatureExtractor::setInputCloud(
     a_test_.clear();
     b_test_.clear();
     c_test_.clear();
-    clusters_.clear();
 
     // Estimate Base Plane
     if (!estimateBasePlane_(rings))
@@ -451,6 +450,7 @@ void FeatureExtractor::extractWall_()
     std::vector<std::vector<int>> grid_visited(grid_size,
                                                std::vector<int>(grid_size, 0));
     pcl::PointCloud<pcl::PointXYZ> transformed_cluster;
+    clusters_.clear();
     for (int m = 0; m < grid_size; ++m)
     {
         for (int n = 0; n < grid_size; ++n)
@@ -469,7 +469,7 @@ void FeatureExtractor::extractWall_()
 
             if (cluster_grid_size < 2)
             {
-                return;
+                continue;
             }
 
             // Inverse Transform from transformed_cluster to cluster
@@ -488,7 +488,7 @@ void FeatureExtractor::extractWall_()
             pcl::PointXYZ wall_end_point_2;
         }
     }
-    debugger::debugColorTextOutput("Finished Clustering", 3, BK);
+    debugger::debugColorOutput("# of Clustering: ", clusters_.size(), 8, BK);
 
     //ground_lines_.clear();
     //for (int i = 0; i < fitted_lines_.size(); ++i)
@@ -569,9 +569,6 @@ void FeatureExtractor::clusterGridDFS_(std::vector<std::vector<int>>& grid_visit
         return;
     }
 
-    // Add point cloud into cluster
-    cluster += grid_cloud_[m][n];
-
     // Exit for visited Grid
     if (grid_visited[m][n] == 1)
     {
@@ -606,17 +603,20 @@ void FeatureExtractor::clusterGridDFS_(std::vector<std::vector<int>>& grid_visit
    
     // Mark as Visited
     grid_visited[m][n] = 1;
+
+    // Add point cloud into cluster
+    cluster += grid_cloud_[m][n];
     cluster_grid_size++;
 
     // get neighbors that line(vertical to normal vector) pass
     double start_x = grid_centroid_[m][n].x +
-                     2 * setting_.GRID_LENGTH * grid_normals_[m][n](1);
+                     setting_.GRID_LENGTH * grid_normals_[m][n](1);
     double start_y = grid_centroid_[m][n].y - 
-                     2 * setting_.GRID_LENGTH * grid_normals_[m][n](0);
+                     setting_.GRID_LENGTH * grid_normals_[m][n](0);
     double end_x   = grid_centroid_[m][n].x -
-                     2 * setting_.GRID_LENGTH * grid_normals_[m][n](1);
+                     setting_.GRID_LENGTH * grid_normals_[m][n](1);
     double end_y   = grid_centroid_[m][n].y +
-                     2 * setting_.GRID_LENGTH * grid_normals_[m][n](0);
+                     setting_.GRID_LENGTH * grid_normals_[m][n](0);
     
     std::vector<std::pair<int, int>> on_grid_idxs;
     bresenhamLine(start_x, start_y, end_x, end_y,
