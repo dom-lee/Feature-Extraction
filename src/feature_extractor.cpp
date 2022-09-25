@@ -466,8 +466,7 @@ void FeatureExtractor::extractWall_()
             int cluster_grid_size = 0;
             clusterGridDFS_(grid_visited, m, n, m, n,
                             transformed_cluster, cluster_grid_size);
-            std::cout << "========" << std::endl;
-            
+
             if (cluster_grid_size < 2)
             {
                 return;
@@ -551,7 +550,7 @@ void FeatureExtractor::extractWall_()
 void FeatureExtractor::clusterGridDFS_(std::vector<std::vector<int>>& grid_visited,
                                        int seed_m, int seed_n, int m, int n,
                                        pcl::PointCloud<pcl::PointXYZ>& cluster,
-                                       int cluster_grid_size)
+                                       int& cluster_grid_size)
 {
     // Check for Seed
     if (seed_m < 0 || seed_m >= grid_visited.size() ||
@@ -608,17 +607,16 @@ void FeatureExtractor::clusterGridDFS_(std::vector<std::vector<int>>& grid_visit
     // Mark as Visited
     grid_visited[m][n] = 1;
     cluster_grid_size++;
-    std::cout << "size: " << cluster_grid_size << std::endl;
 
     // get neighbors that line(vertical to normal vector) pass
     double start_x = grid_centroid_[m][n].x +
-                     setting_.GRID_LENGTH * grid_normals_[m][n](1);
+                     2 * setting_.GRID_LENGTH * grid_normals_[m][n](1);
     double start_y = grid_centroid_[m][n].y - 
-                     setting_.GRID_LENGTH * grid_normals_[m][n](0);
+                     2 * setting_.GRID_LENGTH * grid_normals_[m][n](0);
     double end_x   = grid_centroid_[m][n].x -
-                     setting_.GRID_LENGTH * grid_normals_[m][n](1);
+                     2 * setting_.GRID_LENGTH * grid_normals_[m][n](1);
     double end_y   = grid_centroid_[m][n].y +
-                     setting_.GRID_LENGTH * grid_normals_[m][n](0);
+                     2 * setting_.GRID_LENGTH * grid_normals_[m][n](0);
     
     std::vector<std::pair<int, int>> on_grid_idxs;
     bresenhamLine(start_x, start_y, end_x, end_y,
@@ -635,7 +633,6 @@ void FeatureExtractor::clusterGridDFS_(std::vector<std::vector<int>>& grid_visit
         {
             continue;
         }
-
         clusterGridDFS_(grid_visited, seed_m, seed_n,
                         center_m + idx.first, center_n + idx.second,
                         cluster, cluster_grid_size);

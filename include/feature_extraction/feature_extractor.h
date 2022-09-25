@@ -146,7 +146,7 @@ private:
     void clusterGridDFS_(std::vector<std::vector<int>>& grid_visited,
                          int seed_m, int seed_n, int m, int n,
                          pcl::PointCloud<pcl::PointXYZ>& cluster,
-                         int cluster_grid_size);
+                         int& cluster_grid_size);
 
     // Extract Ground and Find Obstacles with grid method
     void extractGround_();
