@@ -52,6 +52,13 @@ Driver::Driver(ros::NodeHandle& nh)
     b_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("b", 1);
     c_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("c", 1);
 
+    cluster_pubs_.resize(100);
+    for (int i = 0; i < cluster_pubs_.size(); ++i)
+    {
+        cluster_pubs_[i] = nh_.advertise<sensor_msgs::PointCloud2>(
+                                "cluster_" + std::to_string(i), 1);
+    }
+
     base_plane_pub_    = nh_.advertise<visualization_msgs::Marker>("base", 1, true);
     ceiling_plane_pub_ = nh_.advertise<visualization_msgs::Marker>("ceiling", 1, true);
 
@@ -95,6 +102,12 @@ Driver::Driver(ros::NodeHandle& nh)
             publishPointCloud_<pcl::PointXYZ>(a_pub_, feature_extractor.getA());
             publishPointCloud_<pcl::PointXYZ>(b_pub_, feature_extractor.getB());
             publishPointCloud_<pcl::PointXYZ>(c_pub_, feature_extractor.getC());
+
+            auto cluster_ptrs = feature_extractor.getCluster();
+            for (int i = 0; i < std::min(100, (int)cluster_ptrs.size()); ++i)
+            {
+                publishPointCloud_<pcl::PointXYZ>(cluster_pubs_[i], cluster_ptrs[i]);
+            }
 
             visualizeLines_(grid_normals_pub_, 1, "grid_normals",
                             1.0f, 0.0f, 1.0f, feature_extractor.getGridNormals());
@@ -426,8 +439,8 @@ void Driver::reconfigParams_(feature_extraction::feature_extractionConfig& confi
 }
 
 
-void Driver::getClickedPointCallBack_(const 
-        geometry_msgs::PointStamped::ConstPtr& msg)
+void Driver::getClickedPointCallBack_(
+    const geometry_msgs::PointStamped::ConstPtr& msg) const
 {
     pcl::PointXYZ point;
     point.x = msg->point.x;

@@ -40,6 +40,7 @@
 // General Functions
 #include "douglasPeucker.hpp"
 #include "estimatePlaneRANSAC.hpp"
+#include "bresenhamLine.hpp"
 
 // Utils
 #include "utils/timing.h"
@@ -70,6 +71,8 @@ public:
     pcl::PointCloud<pcl::PointXYZ>::Ptr getA();
     pcl::PointCloud<pcl::PointXYZ>::Ptr getB();
     pcl::PointCloud<pcl::PointXYZ>::Ptr getC();
+
+    std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> getCluster();
 
     std::vector<pcl::PointXYZ> getFittedLines();
     std::vector<pcl::PointXYZ> getGroundLines();
@@ -128,6 +131,7 @@ private:
     pcl::PointCloud<pcl::PointXYZ> a_test_;
     pcl::PointCloud<pcl::PointXYZ> b_test_;
     pcl::PointCloud<pcl::PointXYZ> c_test_;
+    std::vector<pcl::PointCloud<pcl::PointXYZ>> clusters_;
 
     
 
@@ -141,7 +145,8 @@ private:
     // Cluster Wall by checking Normal Vector in DFS way
     void clusterGridDFS_(std::vector<std::vector<int>>& grid_visited,
                          int seed_m, int seed_n, int m, int n,
-                         pcl::PointCloud<pcl::PointXYZ>& cluster);
+                         pcl::PointCloud<pcl::PointXYZ>& cluster,
+                         int cluster_grid_size);
 
     // Extract Ground and Find Obstacles with grid method
     void extractGround_();
@@ -160,12 +165,6 @@ private:
     double calculateDistanceInBox_(double center_x, double center_y,
                                    double theta, double box_length);
     
-    // Compute Grid Indexes that approximately lie on the line.
-    // Brensenham's Line Algorithm
-    void executeBresenhamLine(
-        double start_x, double start_y, double end_x, double end_y,
-        double grid_length, std::vector<std::pair<int, int>>& out_grid_idxs);
-
     // Fitting Sorted PointCloud(same ring_id) with Douglas-Peucker Algorithm
     template <class PointT>
     void fitPointCloud_(const pcl::PointCloud<PointT>& in_ring,

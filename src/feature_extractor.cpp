@@ -36,6 +36,7 @@ void FeatureExtractor::setInputCloud(
     a_test_.clear();
     b_test_.clear();
     c_test_.clear();
+    clusters_.clear();
 
     // Estimate Base Plane
     if (!estimateBasePlane_(rings))
@@ -110,6 +111,18 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr FeatureExtractor::getB()
 pcl::PointCloud<pcl::PointXYZ>::Ptr FeatureExtractor::getC()
 {
     return c_test_.makeShared();
+}
+
+std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> FeatureExtractor::getCluster()
+{
+    std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> result;
+
+    for (auto& cluster : clusters_)
+    {
+        result.push_back(cluster.makeShared());
+    }
+
+    return result;
 }
 
 std::vector<pcl::PointXYZ> FeatureExtractor::getFittedLines()
@@ -390,6 +403,7 @@ void FeatureExtractor::extractWall_()
             grid_cloud_[m][n].push_back(point);
         }
     }
+    debugger::debugColorTextOutput("Finished Saving PointCloud in Grid", 3, BK);
 
     // Resize and Clear
     grid_normals_.clear();
@@ -399,7 +413,7 @@ void FeatureExtractor::extractWall_()
     grid_centroid_.resize(grid_size,
                           std::vector<pcl::PointXYZ>(grid_size, {0, 0, 0}));
 
-    // Compute PCA for each grid and get Normal Vector
+    // Compute RANSAC for each grid and get Normal Vector
     for (int m = 0; m < grid_size; ++m)
     {
         for (int n = 0; n < grid_size; ++n)
@@ -431,6 +445,7 @@ void FeatureExtractor::extractWall_()
                                  grid_centroid_[m][n]);
         }
     }
+    debugger::debugColorTextOutput("Finished RANSAC for each Grid", 3, BK);
 
     // Clustering by DFS (with checking normal)
     std::vector<std::vector<int>> grid_visited(grid_size,
@@ -447,27 +462,34 @@ void FeatureExtractor::extractWall_()
                 continue;
             }
 
-            clusterGridDFS_(grid_visited, m, n, m, n, transformed_cluster);
-            
-            // Inverse Transform from transformed_cluster to cluster
-            pcl::PointCloud<pcl::PointXYZ> cluster;
-            pcl::transformPointCloud(transformed_cluster, cluster,
-                                     transformation_.inverse());
             transformed_cluster.clear();
+            int cluster_grid_size = 0;
+            clusterGridDFS_(grid_visited, m, n, m, n,
+                            transformed_cluster, cluster_grid_size);
+            std::cout << "========" << std::endl;
+            
+            if (cluster_grid_size < 2)
+            {
+                return;
+            }
+
+            // Inverse Transform from transformed_cluster to cluster
+            clusters_.push_back({});
+            pcl::transformPointCloud(transformed_cluster, clusters_.back(),
+                                     transformation_.inverse());
 
             // Estimate Wall Plane Coeff from Cluster
             pcl::PointIndices inliers;
-            auto wall_coeff = estimatePlaneRANSAC(cluster,
+            auto wall_coeff = estimatePlaneRANSAC(clusters_.back(),
                                                   setting_.WALL_FIT_THRESHOLD,
                                                   inliers);
-        
-            b_test_ = cluster;
             
             // Find EndPoints 
             pcl::PointXYZ wall_end_point_1;
             pcl::PointXYZ wall_end_point_2;
         }
     }
+    debugger::debugColorTextOutput("Finished Clustering", 3, BK);
 
     //ground_lines_.clear();
     //for (int i = 0; i < fitted_lines_.size(); ++i)
@@ -528,7 +550,8 @@ void FeatureExtractor::extractWall_()
 
 void FeatureExtractor::clusterGridDFS_(std::vector<std::vector<int>>& grid_visited,
                                        int seed_m, int seed_n, int m, int n,
-                                       pcl::PointCloud<pcl::PointXYZ>& cluster)
+                                       pcl::PointCloud<pcl::PointXYZ>& cluster,
+                                       int cluster_grid_size)
 {
     // Check for Seed
     if (seed_m < 0 || seed_m >= grid_visited.size() ||
@@ -584,6 +607,8 @@ void FeatureExtractor::clusterGridDFS_(std::vector<std::vector<int>>& grid_visit
    
     // Mark as Visited
     grid_visited[m][n] = 1;
+    cluster_grid_size++;
+    std::cout << "size: " << cluster_grid_size << std::endl;
 
     // get neighbors that line(vertical to normal vector) pass
     double start_x = grid_centroid_[m][n].x +
@@ -596,8 +621,8 @@ void FeatureExtractor::clusterGridDFS_(std::vector<std::vector<int>>& grid_visit
                      setting_.GRID_LENGTH * grid_normals_[m][n](0);
     
     std::vector<std::pair<int, int>> on_grid_idxs;
-    executeBresenhamLine(start_x, start_y, end_x, end_y,
-                         setting_.GRID_LENGTH, on_grid_idxs);
+    bresenhamLine(start_x, start_y, end_x, end_y,
+                  setting_.GRID_LENGTH, on_grid_idxs);
 
     // Index of Center Grid
     int center_m = setting_.GRID_RANGE;
@@ -612,7 +637,8 @@ void FeatureExtractor::clusterGridDFS_(std::vector<std::vector<int>>& grid_visit
         }
 
         clusterGridDFS_(grid_visited, seed_m, seed_n,
-                        center_m + idx.first, center_n + idx.second, cluster);
+                        center_m + idx.first, center_n + idx.second,
+                        cluster, cluster_grid_size);
     }
 }
 
@@ -1219,8 +1245,8 @@ double FeatureExtractor::processBeamModel_(double center_x, double center_y,
 
             // Calculate Score by counting ground cell on the beam
             std::vector<std::pair<int, int>> on_grid_idxs;
-            executeBresenhamLine(center_x, center_y, mean_x, mean_y,
-                                 grid_length, on_grid_idxs);
+            bresenhamLine(center_x, center_y, mean_x, mean_y,
+                          grid_length, on_grid_idxs);
             
             double score_on_line = 0.0;
             for (auto& idx : on_grid_idxs)
@@ -1294,53 +1320,6 @@ double FeatureExtractor::calculateDistanceInBox_(
         std::pow(center_y - intersection_horizontal.second, 2));
 
     return std::min(distance_to_verical, distance_to_horizontal);
-}
-
-void FeatureExtractor::executeBresenhamLine(
-    double start_x, double start_y, double end_x, double end_y, double grid_length,
-    std::vector<std::pair<int, int>>& out_grid_idxs)
-{
-    out_grid_idxs.clear();
-    
-    int x0 = std::floor((start_x + grid_length / 2) / grid_length);
-    int y0 = std::floor((start_y + grid_length / 2) / grid_length);
-    int x1 = std::floor((end_x + grid_length / 2) / grid_length);
-    int y1 = std::floor((end_y + grid_length / 2) / grid_length);
-    
-    double dx = std::abs(x1 - x0);
-    double sx = (x0 < x1) ? 1 : -1;
-    double dy = -std::abs(y1 - y0);
-    double sy = (y0 < y1) ? 1 : -1;
-    double error = dx + dy;
-
-    while (true)
-    {
-        out_grid_idxs.push_back({x0, y0});
-        if (x0 == x1 && y0 == y1)
-        {
-            break;
-        }
-
-        double e2 = 2 * error;
-        if (e2 >= dy)
-        {
-            if (x0 == x1)
-            {
-                break;
-            }
-            error += dy;
-            x0 += sx;
-        }
-        if (e2 <= dx)
-        {
-            if (y0 == y1)
-            {
-                break;
-            }
-            error += dx;
-            y0 += sy;
-        }
-    }
 }
 
 template <class PointT>

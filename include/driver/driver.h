@@ -81,6 +81,8 @@ private:
     ros::Publisher b_pub_;
     ros::Publisher c_pub_;
 
+    std::vector<ros::Publisher> cluster_pubs_;
+
     ros::Publisher grid_normals_pub_;
     ros::Publisher fitted_lines_pub_;
     ros::Publisher ground_lines_pub_;
@@ -126,6 +128,7 @@ private:
     void reconfigParams_(feature_extraction::feature_extractionConfig& config,
                          uint32_t level);
 
-    void getClickedPointCallBack_(const geometry_msgs::PointStamped::ConstPtr& msg);
+    void getClickedPointCallBack_(
+        const geometry_msgs::PointStamped::ConstPtr& msg) const;
 };
 #endif /* DRIVER_H */
