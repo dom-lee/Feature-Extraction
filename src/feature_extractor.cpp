@@ -488,6 +488,7 @@ void FeatureExtractor::extractWall_()
             // Find EndPoints 
             pcl::PointXYZ wall_end_point_1;
             pcl::PointXYZ wall_end_point_2;
+            
             double min_result = 1;
             double max_result = -1;
 
@@ -510,7 +511,7 @@ void FeatureExtractor::extractWall_()
                 Eigen::Vector3f grid_vector = grid_centroid_2d - centroid_of_wall_2d;
                 Eigen::Vector3f line_vector(norm.y(), -norm.x(), 0);
                 Eigen::Vector3f projection_point = ((grid_vector.dot(line_vector))/line_vector.norm())*line_vector/line_vector.norm();
-                
+
                 double result = projection_point.dot(line_vector);
                 if (result < min_result || min_result == 1)
                 {
