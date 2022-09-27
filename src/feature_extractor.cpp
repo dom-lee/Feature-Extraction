@@ -464,8 +464,10 @@ void FeatureExtractor::extractWall_()
 
             transformed_cluster.clear();
             int cluster_grid_size = 0;
+            std::vector<std::pair<int, int>> index_of_cluster;
             clusterGridDFS_(grid_visited, m, n, m, n,
-                            transformed_cluster, cluster_grid_size);
+                            transformed_cluster, cluster_grid_size,
+                            index_of_cluster);
 
             if (cluster_grid_size < 2)
             {
@@ -482,10 +484,51 @@ void FeatureExtractor::extractWall_()
             auto wall_coeff = estimatePlaneRANSAC(clusters_.back(),
                                                   setting_.WALL_FIT_THRESHOLD,
                                                   inliers);
-            
+
             // Find EndPoints 
             pcl::PointXYZ wall_end_point_1;
             pcl::PointXYZ wall_end_point_2;
+            double min_result = 1;
+            double max_result = -1;
+
+            pcl::PointXYZ centroid_of_wall;
+            pcl::computeCentroid(clusters_.back(), inliers.indices,
+                                 centroid_of_wall);
+            Eigen::Vector3f norm = wall_coeff.head(3);
+            norm.z() = 0;
+
+            for (int i = 0; i < index_of_cluster.size(); ++i)
+            {
+                int m = index_of_cluster[i].first;
+                int n = index_of_cluster[i].second;
+
+                Eigen::Vector3f grid_centroid_2d = grid_centroid_[m][n].getVector3fMap();
+                Eigen::Vector3f centroid_of_wall_2d = centroid_of_wall.getVector3fMap();
+                centroid_of_wall_2d.z() = 0;
+                grid_centroid_2d.z() = 0;
+
+                Eigen::Vector3f grid_vector = grid_centroid_2d - centroid_of_wall_2d;
+                Eigen::Vector3f line_vector(norm.y(), -norm.x(), 0);
+                Eigen::Vector3f projection_point = ((grid_vector.dot(line_vector))/line_vector.norm())*line_vector/line_vector.norm();
+                
+                double result = projection_point.dot(line_vector);
+                if (result < min_result || min_result == 1)
+                {
+                    min_result = result;
+                    wall_end_point_1.x = (projection_point + grid_centroid_2d).x();
+                    wall_end_point_1.y = (projection_point + grid_centroid_2d).y();
+                    wall_end_point_1.z = 0;
+                }
+
+                if (result > max_result || max_result == -1)
+                {
+                    max_result = result;
+                    wall_end_point_2.x = (projection_point + grid_centroid_2d).x();
+                    wall_end_point_2.y = (projection_point + grid_centroid_2d).y();
+                    wall_end_point_2.z = 0;
+                }
+            }
+
         }
     }
     debugger::debugColorOutput("# of Clustering: ", clusters_.size(), 8, BK);
@@ -550,7 +593,8 @@ void FeatureExtractor::extractWall_()
 void FeatureExtractor::clusterGridDFS_(std::vector<std::vector<int>>& grid_visited,
                                        int seed_m, int seed_n, int m, int n,
                                        pcl::PointCloud<pcl::PointXYZ>& cluster,
-                                       int& cluster_grid_size)
+                                       int& cluster_grid_size,
+                                       std::vector<std::pair<int, int>>& idex)
 {
     // Check for Seed
     if (seed_m < 0 || seed_m >= grid_visited.size() ||
@@ -607,6 +651,7 @@ void FeatureExtractor::clusterGridDFS_(std::vector<std::vector<int>>& grid_visit
     // Add point cloud into cluster
     cluster += grid_cloud_[m][n];
     cluster_grid_size++;
+    idex.push_back({m, n});
 
     // get neighbors that line(vertical to normal vector) pass
     double start_x = grid_centroid_[m][n].x +
@@ -633,9 +678,10 @@ void FeatureExtractor::clusterGridDFS_(std::vector<std::vector<int>>& grid_visit
         {
             continue;
         }
+        std::vector<std::pair<int, int>> not_used;
         clusterGridDFS_(grid_visited, seed_m, seed_n,
                         center_m + idx.first, center_n + idx.second,
-                        cluster, cluster_grid_size);
+                        cluster, cluster_grid_size, not_used);
     }
 }
 
