@@ -463,13 +463,11 @@ void FeatureExtractor::extractWall_()
             }
 
             transformed_cluster.clear();
-            int cluster_grid_size = 0;
             std::vector<std::pair<int, int>> index_of_cluster;
             clusterGridDFS_(grid_visited, m, n, m, n,
-                            transformed_cluster, cluster_grid_size,
-                            index_of_cluster);
+                            transformed_cluster, index_of_cluster);
 
-            if (cluster_grid_size < 2)
+            if (index_of_cluster.size() < 2)
             {
                 continue;
             }
@@ -484,118 +482,61 @@ void FeatureExtractor::extractWall_()
             auto wall_coeff = estimatePlaneRANSAC(clusters_.back(),
                                                   setting_.WALL_FIT_THRESHOLD,
                                                   inliers);
+            // Intersection Point 
+            // A: (-d/a, 0, 0),  B: (0, -d/b, 0)
+            Eigen::Vector3f point_a(-wall_coeff(3) / wall_coeff(0), 0, 0);
+            Eigen::Vector3f point_b(0, -wall_coeff(3) / wall_coeff(1), 0);
+            Eigen::Vector3f vector_ab = (point_b - point_a);
+            vector_ab.normalize();
 
-            // Find EndPoints 
-            pcl::PointXYZ wall_end_point_1;
-            pcl::PointXYZ wall_end_point_2;
-            
-            double min_result = 1;
-            double max_result = -1;
-
-            pcl::PointXYZ centroid_of_wall;
-            pcl::computeCentroid(clusters_.back(), inliers.indices,
-                                 centroid_of_wall);
-            Eigen::Vector3f norm = wall_coeff.head(3);
-            norm.z() = 0;
-
-            for (int i = 0; i < index_of_cluster.size(); ++i)
+            // Find Projected End point on Intersection of Wall Plane
+            Eigen::Vector3f end_point1;
+            Eigen::Vector3f end_point2;
+            double min_projected_distance = INFINITY;
+            double max_projected_distance = -INFINITY;
+            for (auto& idx : index_of_cluster)
             {
-                int m = index_of_cluster[i].first;
-                int n = index_of_cluster[i].second;
-
-                Eigen::Vector3f grid_centroid_2d = grid_centroid_[m][n].getVector3fMap();
-                Eigen::Vector3f centroid_of_wall_2d = centroid_of_wall.getVector3fMap();
-                centroid_of_wall_2d.z() = 0;
-                grid_centroid_2d.z() = 0;
-
-                Eigen::Vector3f grid_vector = grid_centroid_2d - centroid_of_wall_2d;
-                Eigen::Vector3f line_vector(norm.y(), -norm.x(), 0);
-                Eigen::Vector3f projection_point = ((grid_vector.dot(line_vector))/line_vector.norm())*line_vector/line_vector.norm();
-
-                double result = projection_point.dot(line_vector);
-                if (result < min_result || min_result == 1)
+                Eigen::Vector3f centroid_from_a = -point_a +
+                    grid_centroid_[idx.first][idx.second].getVector3fMap();
+                
+                double projected_dist = centroid_from_a.dot(vector_ab);
+                if (projected_dist > max_projected_distance)
                 {
-                    min_result = result;
-                    wall_end_point_1.x = (projection_point + grid_centroid_2d).x();
-                    wall_end_point_1.y = (projection_point + grid_centroid_2d).y();
-                    wall_end_point_1.z = 0;
+                    max_projected_distance = projected_dist;
+                    end_point1 = point_a + projected_dist * vector_ab;
                 }
-
-                if (result > max_result || max_result == -1)
+                if (projected_dist < min_projected_distance)
                 {
-                    max_result = result;
-                    wall_end_point_2.x = (projection_point + grid_centroid_2d).x();
-                    wall_end_point_2.y = (projection_point + grid_centroid_2d).y();
-                    wall_end_point_2.z = 0;
+                    min_projected_distance = projected_dist;
+                    end_point2 = point_a + projected_dist * vector_ab;
                 }
             }
 
+            // Interpolate Endpoint
+            Eigen::Vector3f end_points_vector = end_point2 - end_point1;
+            double distance = end_points_vector.norm();
+            end_points_vector.normalize();
+            int num_interpolation = distance / 0.1;
+
+            landmark_.push_back(pcl::PointXYZ(end_point1(0), end_point1(1), 0));
+            for (int i = 0; i < num_interpolation; ++i)
+            {
+                Eigen::Vector3f interpolated_point =
+                    end_point1 + (i + 1) * 0.1 * end_points_vector;
+                landmark_.push_back(pcl::PointXYZ(interpolated_point(0),
+                                                  interpolated_point(1),
+                                                  0));
+            }
+            landmark_.push_back(pcl::PointXYZ(end_point2(0), end_point2(1), 0));
         }
     }
     debugger::debugColorOutput("# of Clustering: ", clusters_.size(), 8, BK);
-
-    //ground_lines_.clear();
-    //for (int i = 0; i < fitted_lines_.size(); ++i)
-    //{
-        //for (int j = 0; j < (int)fitted_lines_[i].size() / 2; ++j)
-        //{
-            //if (checkIsGroundLine_(fitted_lines_[i][2 * j],
-                                   //fitted_lines_[i][2 * j + 1]))
-            //{
-                //ground_lines_.push_back(fitted_lines_[i][2 * j]);
-                //ground_lines_.push_back(fitted_lines_[i][2 * j + 1]);
-            //}
-
-        //}
-        
-    //}
-
-    //// Interpolate Fitted Lines by azimuth
-    //double resolution = 2.0 * M_PI / (double)setting_.SECTION_NUMBER;
-
-    //std::vector<std::vector<pcl::PointXYZ>> interpolated_fitted_lines(
-        //fitted_lines_.size(), std::vector<pcl::PointXYZ>(setting_.SECTION_NUMBER));
-    //for (int i = 0; i < fitted_lines_.size(); ++i)
-    //{
-        //for (int j = 0; j < (int)fitted_lines_[i].size() / 2; ++j)
-        //{
-            //double x1 = fitted_lines_[i][2 * j].x;
-            //double y1 = fitted_lines_[i][2 * j].y;
-            //double z1 = fitted_lines_[i][2 * j].z;
-            //double x2 = fitted_lines_[i][2 * j + 1].x;
-            //double y2 = fitted_lines_[i][2 * j + 1].y;
-            //double z2 = fitted_lines_[i][2 * j + 1].z;
-
-            //double azimuth_start = std::atan2(y1, x1);
-            //double azimuth_end   = std::atan2(y2, x2);
-            
-            //int start_idx = std::ceil((azimuth_start + M_PI) / resolution);
-            //int end_idx   = std::floor((azimuth_end + M_PI) / resolution);
-
-            //for (int k = start_idx; k < end_idx + 1; ++k)
-            //{
-                //double azimuth = k * resolution - M_PI;
-                //double r = (y1 * x2 - x1 * y2) /
-                           //((y1 - y2) * std::cos(azimuth) - 
-                            //(x1 - x2) * std::sin(azimuth));
-                
-                //pcl::PointXYZ interpolated_point;
-                //interpolated_point.x = r * std::cos(azimuth);
-                //interpolated_point.y = r * std::sin(azimuth);
-                //interpolated_point.z = z1 + (z1 - z2) / (x1 - x2) *
-                                       //(interpolated_point.x - x1);
-
-                //a_test_.push_back(interpolated_point);
-            //}
-        //}
-    //}
 }
 
 void FeatureExtractor::clusterGridDFS_(std::vector<std::vector<int>>& grid_visited,
                                        int seed_m, int seed_n, int m, int n,
                                        pcl::PointCloud<pcl::PointXYZ>& cluster,
-                                       int& cluster_grid_size,
-                                       std::vector<std::pair<int, int>>& idex)
+                                       std::vector<std::pair<int, int>>& grid_idx)
 {
     // Check for Seed
     if (seed_m < 0 || seed_m >= grid_visited.size() ||
@@ -651,8 +592,7 @@ void FeatureExtractor::clusterGridDFS_(std::vector<std::vector<int>>& grid_visit
 
     // Add point cloud into cluster
     cluster += grid_cloud_[m][n];
-    cluster_grid_size++;
-    idex.push_back({m, n});
+    grid_idx.push_back({m, n});
 
     // get neighbors that line(vertical to normal vector) pass
     double start_x = grid_centroid_[m][n].x +
@@ -679,10 +619,9 @@ void FeatureExtractor::clusterGridDFS_(std::vector<std::vector<int>>& grid_visit
         {
             continue;
         }
-        std::vector<std::pair<int, int>> not_used;
         clusterGridDFS_(grid_visited, seed_m, seed_n,
                         center_m + idx.first, center_n + idx.second,
-                        cluster, cluster_grid_size, not_used);
+                        cluster, grid_idx);
     }
 }
 

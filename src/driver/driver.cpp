@@ -84,30 +84,30 @@ Driver::Driver(ros::NodeHandle& nh)
                 is_extractor_setting_changed_ = false;
             }
 
-            //std::chrono::steady_clock::time_point start_time = timing::getCurrentTime();
+            std::chrono::steady_clock::time_point start_time = timing::getCurrentTime();
 
             feature_extractor.setInputCloud(rings_);
             feature_extractor.run();
 
-            //ROS_INFO("%f", timing::spendElapsedTime(start_time));
+            ROS_INFO("%f", timing::spendElapsedTime(start_time));
 
 
             //publishPointCloud_<pcl::PointXYZ>(ground_pub_,
                                               //feature_extractor.getGround());
             //publishPointCloud_<pcl::PointXYZ>(obstacles_pub_,
                                               //feature_extractor.getObstacles());
-            //publishPointCloud_<pcl::PointXYZ>(landmark_pub_,
-                                              //feature_extractor.getLandmark());
+            publishPointCloud_<pcl::PointXYZ>(landmark_pub_,
+                                              feature_extractor.getLandmark());
 
             publishPointCloud_<pcl::PointXYZ>(a_pub_, feature_extractor.getA());
             publishPointCloud_<pcl::PointXYZ>(b_pub_, feature_extractor.getB());
             publishPointCloud_<pcl::PointXYZ>(c_pub_, feature_extractor.getC());
 
-            auto cluster_ptrs = feature_extractor.getCluster();
-            for (int i = 0; i < std::min(100, (int)cluster_ptrs.size()); ++i)
-            {
-                publishPointCloud_<pcl::PointXYZ>(cluster_pubs_[i], cluster_ptrs[i]);
-            }
+            //auto cluster_ptrs = feature_extractor.getCluster();
+            //for (int i = 0; i < std::min(100, (int)cluster_ptrs.size()); ++i)
+            //{
+                //publishPointCloud_<pcl::PointXYZ>(cluster_pubs_[i], cluster_ptrs[i]);
+            //}
 
             visualizeLines_(grid_normals_pub_, 1, "grid_normals",
                             1.0f, 0.0f, 1.0f, feature_extractor.getGridNormals());
