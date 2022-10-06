@@ -94,6 +94,7 @@ private:
     ros::Publisher ceiling_plane_pub_;
 
     // Paramters
+    int driver_mode_;
     lidar_setting_t lidar_setting_;
     feature_extractor_setting_t extractor_setting_;
     bool is_extractor_setting_changed_;
@@ -113,7 +114,7 @@ private:
 
     template <class PointT>
     void visualizeLines_(ros::Publisher& publisher,
-                         int id, std::string name,
+                         int id, std::string name, double x,
                          double r, double g, double b,
                          const std::vector<PointT>& lines);
 

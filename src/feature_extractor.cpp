@@ -10,23 +10,39 @@
 
 using namespace bipedlab;
 
-FeatureExtractor::FeatureExtractor(lidar_setting_t lidar_setting) 
+FeatureExtractor::FeatureExtractor(lidar_setting_t lidar_setting, int mode) 
 {
+    // Feature Extractor Mode
+    if (mode == 0)
+    {
+        mode_ = Extractor_modes_t::CURB;
+    }
+    else if (mode == 1)
+    {
+        mode_ = Extractor_modes_t::WALL;
+    }
+    else
+    {
+        debugger::debugWarningOutput("Check Mode parameter, mode: ", mode, 10);
+    }
+
     // Set Property of LiDAR
     elevation_angles_ = lidar_setting.elevation_angles;
     estimated_lidar_height_ = lidar_setting.height;
     origin_ = pcl::PointXYZ(0, 0, 0);
 
+    // Status
     base_plane_updated_ = false;
 
-    debugger::debugTitleTextOutput("[Feature Extractor]", "Constructed", 10, BC);
+    debugger::debugTitleTextOutput("[Feature Extractor]", "Constructed",
+                                   10, BC);
 }
 
 void FeatureExtractor::changeSetting(feature_extractor_setting_t setting)
 {
     setting_ = setting;
-
-    debugger::debugTitleTextOutput("[Feature Extractor]", "Setting Changed", 10, BG);
+    debugger::debugTitleTextOutput("[Feature Extractor]", "Setting Changed",
+                                   10, BG);
 }
 
 void FeatureExtractor::setInputCloud(
@@ -65,8 +81,17 @@ void FeatureExtractor::run()
 {
     if (base_plane_updated_)
     {
-        debugger::debugColorTextOutput("[Feature Extractor] Execute", 5, BW);
-        extractWall_();
+        if (mode_ == Extractor_modes_t::CURB)
+        {
+            debugger::debugColorTextOutput("[Curb Extractor] Execute", 5, BW);
+            extractGround_();
+            extractCurb_();
+        }
+        else if (mode_ == Extractor_modes_t::WALL)
+        {
+            debugger::debugColorTextOutput("[Wall Extractor] Execute", 5, BW);
+            extractWall_();
+        }
     }
     else
     {
@@ -78,7 +103,7 @@ void FeatureExtractor::run()
 pcl::PointCloud<pcl::PointXYZ>::Ptr FeatureExtractor::getGround()
 {
     pcl::PointCloud<pcl::PointXYZ> ground;
-    for (int i = 0; i < setting_.RING_TO_ANALYZE; ++i)
+    for (int i = 0; i < ground_.size(); ++i)
     {
         ground += ground_[i];
     }
@@ -240,12 +265,16 @@ bool FeatureExtractor::estimateBasePlane_(
             int azimuth_idx = int(azimuth * 180 / M_PI + 180) % 360;
 
             // Updated curr_ring_r_z when the point has a lower z value
-            if (curr_ring_cloud[azimuth_idx].empty() ||
-                point.z < curr_ring_r_z[azimuth_idx].second)
-            {
-                curr_ring_r_z[azimuth_idx] = {r, point.z};
-            }
+            curr_ring_r_z[azimuth_idx].first  += r;
+            curr_ring_r_z[azimuth_idx].second += point.z;
             curr_ring_cloud[azimuth_idx].push_back(point);
+        }
+
+        // Compute average
+        for (int k = 0; k < section_number; ++k)
+        {
+            curr_ring_r_z[k].first  /= curr_ring_cloud[k].size();
+            curr_ring_r_z[k].second /= curr_ring_cloud[k].size();
         }
 
         // Skip checking gradient for Ring 0
@@ -282,6 +311,8 @@ bool FeatureExtractor::estimateBasePlane_(
         }
     } // Finish Sampling Candidates for Base
 
+    a_test_ = base_candidate;
+
     if (base_candidate.size() < 10)
     {
         PCL_ERROR("Not Enough Candidates for Base estimation \n");
@@ -310,14 +341,17 @@ bool FeatureExtractor::estimateBasePlane_(
     // Calculated Transformation Matrix
     // Rotation Matrix
     // Row-Wise Normalized 
-    // | c  0 -a |
-    // | 0  c -b |
-    // | a  b  c | 
+    // | c   0        -a  |
+    // | -ab a^2+c^2  -bc |
+    // | a   b        c   |
+    double a = base_coeff_(0);
+    double b = base_coeff_(1);
+    double c = base_coeff_(2);
     transformation_ = Eigen::Matrix4f::Identity(4, 4);
-    transformation_.block<3, 3>(0, 0) <<
-        base_coeff_(2), 0,              -base_coeff_(0),
-        0,              base_coeff_(2), -base_coeff_(1),
-        base_coeff_(0), base_coeff_(1), base_coeff_(2);
+    transformation_.block<3, 3>(0, 0) << 
+        c,      0,                               -a,
+        -a * b, std::pow(a, 2) + std::pow(c, 2), -b * c,
+        a,      b,                               c;
     transformation_.rowwise().normalize();
 
     debugger::debugColorOutput("Transformation \n", transformation_, 3, BB); 
@@ -362,6 +396,7 @@ void FeatureExtractor::extractWall_()
     // Save PointCloud into Grid
     for (int i = 0; i < RING_NUMBER; ++i)
     {
+        ground_[i].clear();
         for (int j = 0; j < transformed_rings_[i].size(); ++j)
         {
             pcl::PointXYZ& point = transformed_rings_[i][j];
@@ -373,23 +408,21 @@ void FeatureExtractor::extractWall_()
             {
                 continue;
             }
-            
 
             // Visualization for Ground
             if (point.z < -estimated_lidar_height_ + 0.2 &&
                 point.z > -estimated_lidar_height_ - 0.2)
             {
-                c_test_.push_back(point);
+                ground_[i].push_back(point);
+                continue;
             }
-            // Visualization
 
             // Filter Ground and Ceiling
             if (point.z < -estimated_lidar_height_ + 0.2 ||
-                point.z > -estimated_lidar_height_ + 1.5)
+                point.z > -estimated_lidar_height_ + 2.0)
             {
                 continue;
             }
-            a_test_.push_back(point);
 
             // Index of Grid 
             int m = center_m + (point.x + grid_length / 2) / grid_length;
@@ -400,6 +433,8 @@ void FeatureExtractor::extractWall_()
             grid_max_z[m][n] = std::max((double)point.z, grid_max_z[m][n]);
 
             grid_cloud_[m][n].push_back(point);
+
+            a_test_.push_back(point);
         }
     }
     debugger::debugColorTextOutput("Finished Saving PointCloud in Grid", 3, BK);
@@ -801,10 +836,13 @@ void FeatureExtractor::extractGround_()
             // Check Height Difference with Neighbor Ground Cells 
             // [*Important*] DownSlope has longer distance between ring
             double grid_height_diff = grid_max_z[m][n] -
-                                      std::min(grid_min_z[m][n], max_z_neighbor_ground);
+                                      std::min(grid_min_z[m][n],
+                                               max_z_neighbor_ground);
             if (grid_height_diff > setting_.OBSTACLE_THRESHOLD ||
-                grid_max_z[m][n] > max_z_neighbor_ground + setting_.GROUND_THRESHOLD ||
-                grid_min_z[m][n] < min_z_neighbor_ground - 3 * setting_.GROUND_THRESHOLD)
+                grid_max_z[m][n] > max_z_neighbor_ground +
+                                   setting_.GROUND_THRESHOLD ||
+                grid_min_z[m][n] < min_z_neighbor_ground - 
+                                   3 * setting_.GROUND_THRESHOLD)
             {
                 grid_ground_[m][n] = -1;
 
@@ -863,114 +901,28 @@ void FeatureExtractor::extractGround_()
     }
 }
 
-//void FeatureExtractor::extractCurb_()
-//{
-    //downsampled_lines_.resize(ground_.size());
-    //pcl::PointCloud<pcl::PointXYZ> transformed_landmark;
+void FeatureExtractor::extractCurb_()
+{
     //for (int i = 0; i < ground_.size(); ++i)
     //{
-        //downsampled_lines_[i].clear();
-
-        //if (ground_[i].empty())
-        //{
-            //continue;
-        //}
-        //int ring_size = ground_[i].size();
-
-        //// Precompute Line Section
-        //int smooth_points_count = 1;
-        //Eigen::Vector3f start_point = ground_[i][0].getVector3fMap();
-        //for (int j = 0; j < ring_size; ++j)
-        //{
-            //Eigen::Vector3f point_curr = ground_[i][j].getVector3fMap();
-            //Eigen::Vector3f point_next = ground_[i][(j + 1) % ring_size].getVector3fMap();
-
-            //// Check Discontinuity
-            //double azimuth_curr = std::atan2(point_curr(1), point_curr(0));
-            //double azimuth_next = std::atan2(point_next(1), point_next(0));
-
-            //double azimuth_diff = azimuth_next - azimuth_curr;
-            //double distance_diff = (point_curr - point_next).norm();
-            //bool is_next_point_discontinued = 
-                //(azimuth_diff > setting_.DISCONTINUITY_AZIMUTH ||
-                 //distance_diff > setting_.DISCONTINUITY_DISTANCE);
-
-            //if (is_next_point_discontinued)
-            //{
-                //a_test_.push_back(ground_[i][(j + 1) % ring_size]);
-            //}
-
-            //// Skip when current_point is same with start_point
-            //if (point_curr == start_point)
-            //{
-                //start_point = is_next_point_discontinued ? point_next : start_point;
-                //smooth_points_count = is_next_point_discontinued ? 0 : 1;
-                //continue;
-            //}
-
-            //// Corner Detection for next point by checking Curvature
-            //Eigen::Vector3f sum_vector = Eigen::Vector3f::Zero();
-            //for (int w = 0; w < setting_.SMOOTH_COUNT; ++w)
-            //{
-                //int idx_next = (j + w + 1) % ring_size;
-                //int idx_prev = (j - w - 1 + ring_size) % ring_size;
-
-                //sum_vector += (point_next - ground_[i][idx_next].getVector3fMap());
-                //sum_vector += (point_next - ground_[i][idx_prev].getVector3fMap());
-            //}
-            //double smoothness = sum_vector.norm() / point_next.norm() /
-                                //(2 * setting_.SMOOTH_COUNT);
-            //double is_next_point_sharp = (smoothness > setting_.SMOOTHNESS_THRESHOLD);
-
-
-            //if (is_next_point_sharp)
-            //{
-                //b_test_.push_back(ground_[i][(j + 1) % ring_size]);
-            //}
-
-            //// Check whether it needs to add downsampled lines
-            //bool need_update_line = is_next_point_discontinued;
-            //if (!need_update_line && is_next_point_sharp)
-            //{
-                //Eigen::Vector3f v_a = start_point - point_curr;
-                //Eigen::Vector3f v_b = point_next - point_curr;
-                //double angle = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
-
-                //if (angle < setting_.CONTINUITY_ANGLE)
-                //{
-                    //need_update_line = true;
-                //}
-            //}
-
-            //// Update Downsampled Lines
-            //if (need_update_line)
-            //{
-                //if (smooth_points_count >= 10)
-                //{
-                    //downsampled_lines_[i].push_back({start_point, point_curr});
-                //}
-                //start_point = is_next_point_discontinued ? point_next : point_curr;
-                //smooth_points_count = is_next_point_discontinued ? 0 : 1;
-
-                //pcl::PointXYZ pp(start_point(0), start_point(1), start_point(2));
-            //}
-            //smooth_points_count++;
-        //} // End of Pre-Computing Feature Lines
-
-        //// Execute Curb Extraction with FeatureLines
-        //for (int k = 0; k < (int)downsampled_lines_[i].size() - 1; ++k)
+        //fitted_lines_[i].clear();
+        //fitPointCloud_(ground_[i], fitted_lines_[i]);
+        //for (int k = 1; k < (int)fitted_lines_[i].size() / 2 - 1; ++k)
         //{
             //// Assume current line is sidewalk
-            //Eigen::Vector3f& start_curr = downsampled_lines_[i][k].first;
-            //Eigen::Vector3f& end_curr   = downsampled_lines_[i][k].second;
+            //pcl::PointXYZ& start_point = fitted_lines_[i][2 * k];
+            //pcl::PointXYZ& end_point   = fitted_lines_[i][2 * k + 1];
+
+            //Eigen::Vector3f start_curr = fitted_lines_[i][k].getVector3fMap();
+            //Eigen::Vector3f end_curr   = fitted_lines_[i][k + 1].getVector3fMap();
             //pcl::PointXYZ start_point(start_curr(0), start_curr(1), start_curr(2));
             //pcl::PointXYZ end_point(end_curr(0), end_curr(1), end_curr(2));
 
             //// Adjacent Downsampled lines
-            //Eigen::Vector3f& start_next = downsampled_lines_[i][k + 1].first;
-            //Eigen::Vector3f& end_next   = downsampled_lines_[i][k + 1].second;
-            //Eigen::Vector3f& start_prev = downsampled_lines_[i][k - 1].first;
-            //Eigen::Vector3f& end_prev   = downsampled_lines_[i][k - 1].second;
+            //Eigen::Vector3f& start_next = fitted_lines_[i][k + 1].first;
+            //Eigen::Vector3f& end_next   = fitted_lines_[i][k + 1].second;
+            //Eigen::Vector3f& start_prev = fitted_lines_[i][k - 1].first;
+            //Eigen::Vector3f& end_prev   = fitted_lines_[i][k - 1].second;
 
             //// Vector for using angular threshold
             //Eigen::Vector2f v_a, v_b, v_c;
@@ -1056,8 +1008,9 @@ void FeatureExtractor::extractGround_()
 
     //// Restoration
     //landmark_.clear();
-    //pcl::transformPointCloud(transformed_landmark, landmark_, transformation_.transpose());
-//}
+    //pcl::transformPointCloud(transformed_landmark, landmark_,
+                             //transformation_.transpose());
+}
 
 void FeatureExtractor::estimateRoadModel_()
 {

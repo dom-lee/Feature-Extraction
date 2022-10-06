@@ -67,7 +67,7 @@ Driver::Driver(ros::NodeHandle& nh)
     server.setCallback(boost::bind(&Driver::reconfigParams_, this, _1, _2));
 
     // Construct Feature Extractor
-    FeatureExtractor feature_extractor(lidar_setting_);
+    FeatureExtractor feature_extractor(lidar_setting_, driver_mode_);
 
     // Run Feature Dectector
     ros::Rate r(publishing_rate_);
@@ -84,7 +84,7 @@ Driver::Driver(ros::NodeHandle& nh)
                 is_extractor_setting_changed_ = false;
             }
 
-            std::chrono::steady_clock::time_point start_time = timing::getCurrentTime();
+            auto start_time = timing::getCurrentTime();
 
             feature_extractor.setInputCloud(rings_);
             feature_extractor.run();
@@ -92,10 +92,10 @@ Driver::Driver(ros::NodeHandle& nh)
             ROS_INFO("%f", timing::spendElapsedTime(start_time));
 
 
-            //publishPointCloud_<pcl::PointXYZ>(ground_pub_,
-                                              //feature_extractor.getGround());
-            //publishPointCloud_<pcl::PointXYZ>(obstacles_pub_,
-                                              //feature_extractor.getObstacles());
+            publishPointCloud_<pcl::PointXYZ>(ground_pub_,
+                                              feature_extractor.getGround());
+            publishPointCloud_<pcl::PointXYZ>(obstacles_pub_,
+                                              feature_extractor.getObstacles());
             publishPointCloud_<pcl::PointXYZ>(landmark_pub_,
                                               feature_extractor.getLandmark());
 
@@ -103,16 +103,16 @@ Driver::Driver(ros::NodeHandle& nh)
             publishPointCloud_<pcl::PointXYZ>(b_pub_, feature_extractor.getB());
             publishPointCloud_<pcl::PointXYZ>(c_pub_, feature_extractor.getC());
 
-            //auto cluster_ptrs = feature_extractor.getCluster();
-            //for (int i = 0; i < std::min(100, (int)cluster_ptrs.size()); ++i)
-            //{
-                //publishPointCloud_<pcl::PointXYZ>(cluster_pubs_[i], cluster_ptrs[i]);
-            //}
+            auto cluster_ptrs = feature_extractor.getCluster();
+            for (int i = 0; i < std::min(100, (int)cluster_ptrs.size()); ++i)
+            {
+                publishPointCloud_<pcl::PointXYZ>(cluster_pubs_[i], cluster_ptrs[i]);
+            }
 
-            visualizeLines_(grid_normals_pub_, 1, "grid_normals",
+            visualizeLines_(grid_normals_pub_, 1, "grid_normals", 0.1,
                             1.0f, 0.0f, 1.0f, feature_extractor.getGridNormals());
-            //visualizeLines_(fitted_lines_pub_, 1, "fitted lines",
-                            //1.0f, 1.0f, 1.0f, feature_extractor.getFittedLines());
+            visualizeLines_(fitted_lines_pub_, 1, "fitted lines", 0.2,
+                            1.0f, 0.0f, 1.0f, feature_extractor.getFittedLines());
             //visualizeLines_(ground_lines_pub_, 1, "ground lines",
                             //0.0f, 1.0f, 0.0f, feature_extractor.getGroundLines());
             //visualizeLines_(bottom_beam_pub_, 1, "bottom beam", 1.0f, 0.0f, 1.0f,
@@ -247,7 +247,7 @@ void Driver::publishPointCloud_(ros::Publisher& publisher,
 
 template <class PointT>
 void Driver::visualizeLines_(ros::Publisher& publisher,
-                             int id, std::string name,
+                             int id, std::string name, double x,
                              double r, double g, double b,
                              const std::vector<PointT>& lines)
 {
@@ -262,12 +262,12 @@ void Driver::visualizeLines_(ros::Publisher& publisher,
     line_list.action = visualization_msgs::Marker::ADD;
     line_list.pose.orientation.w = 1.0;
 
-    line_list.scale.x = 0.01;
+    line_list.scale.x = x;
     
     line_list.color.r = r;
     line_list.color.g = g;
     line_list.color.b = b;
-    line_list.color.a = 0.5;
+    line_list.color.a = 1.0;
 
     geometry_msgs::Point p1;
     geometry_msgs::Point p2;
@@ -344,6 +344,8 @@ bool Driver::getParameters_()
             getNameOf(publishing_rate_), title_name, received_all);
     ros_utils::checkROSParam(nh_, "publisher_frame", publisher_frame_,
             getNameOf(publisher_frame_), title_name, received_all);
+    ros_utils::checkROSParam(nh_, "driver_mode", driver_mode_,
+            getNameOf(driver_mode_), title_name, received_all);
 
     // LiDAR Property
     ros_utils::checkROSParam(nh_, "lidar_height", lidar_setting_.height,

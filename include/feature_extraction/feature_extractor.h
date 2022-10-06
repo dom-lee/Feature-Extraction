@@ -52,10 +52,16 @@
 
 static const int RING_NUMBER = 32;
 
+enum Extractor_modes_t
+{
+    CURB,
+    WALL,
+};
+
 class FeatureExtractor
 {
 public:
-    FeatureExtractor(lidar_setting_t lidar_setting);
+    FeatureExtractor(lidar_setting_t lidar_setting, int mode);
 
     void changeSetting(feature_extractor_setting_t setting);
 
@@ -85,6 +91,9 @@ public:
     Eigen::Vector4f getCeilingPlane();
 
 private:
+    // Mode (0: Curb Extractor, 1: Wall Extractor)
+    Extractor_modes_t mode_;
+
     // Feature Extractor Parameter
     feature_extractor_setting_t setting_;
 
