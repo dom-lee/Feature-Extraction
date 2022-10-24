@@ -61,15 +61,21 @@ enum Extractor_modes_t
 class FeatureExtractor
 {
 public:
-    FeatureExtractor(lidar_setting_t lidar_setting, int mode);
+    // Constructor
+    FeatureExtractor(lidar_setting_t lidar_setting,
+                     int mode);
 
+    // Change Setting Parameters
     void changeSetting(feature_extractor_setting_t setting);
 
+    // Set PointCloud for feature extraction
     void setInputCloud(
-        std::array<pcl::PointCloud<pcl::PointXYZ>, RING_NUMBER>& rings);
+        std::array<pcl::PointCloud<pcl::PointXYZI>, RING_NUMBER>& rings);
 
+    // Execute Feature Extraction
     void run();
 
+    // Getter Functions
     pcl::PointCloud<pcl::PointXYZ>::Ptr getGround();
     pcl::PointCloud<pcl::PointXYZ>::Ptr getLandmark();
     pcl::PointCloud<pcl::PointXYZ>::Ptr getObstacles();
@@ -77,18 +83,23 @@ public:
     pcl::PointCloud<pcl::PointXYZ>::Ptr getA();
     pcl::PointCloud<pcl::PointXYZ>::Ptr getB();
     pcl::PointCloud<pcl::PointXYZ>::Ptr getC();
+    pcl::PointCloud<pcl::PointXYZ>::Ptr getD();
 
-    std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> getCluster();
+    // Visualize Base
+    Eigen::Vector4f getBasePlane();
 
+    // Visualize Curb Extraction Process
     std::vector<pcl::PointXYZ> getFittedLines();
-    std::vector<pcl::PointXYZ> getGroundLines();
+
+    // Visualize Wall Extraction Process
+    std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> getCluster();
     std::vector<pcl::PointXYZ> getGridNormals();
+
+    // Visualize Glass Detection Process
+    std::vector<Eigen::Vector4f> getGlassPlanes();
 
     std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ>> getBottomBeam();
     std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ>> getTopBeam();
-
-    Eigen::Vector4f getBasePlane();
-    Eigen::Vector4f getCeilingPlane();
 
 private:
     // Mode (0: Curb Extractor, 1: Wall Extractor)
@@ -105,29 +116,29 @@ private:
     // Base Plane model
     bool base_plane_updated_;
     Eigen::Vector4f base_coeff_;
-    Eigen::Vector4f ceiling_coeff_;
     
     // Tramsformation
     Eigen::Matrix4f transformation_;
-    std::array<pcl::PointCloud<pcl::PointXYZ>, RING_NUMBER> transformed_rings_;
+    std::array<pcl::PointCloud<pcl::PointXYZI>, RING_NUMBER> transformed_rings_;
 
     // Occupancy Grid (Transformed)
     std::vector<std::vector<int>> grid_ground_;
-
-    // PointCloud(Ground Removed) for each grid cell
+    // PointCloud(Ground, Ceiling Removed) for each grid cell
     std::vector<std::vector<pcl::PointCloud<pcl::PointXYZ>>> grid_cloud_;
-
     // Normal Vector and Mean XYZ for Grid
     std::vector<std::vector<Eigen::Vector3f>> grid_normals_;
     std::vector<std::vector<pcl::PointXYZ>> grid_centroid_;
 
     // Ground and Obstacles (Results from Ground Extraction)
-    std::array<pcl::PointCloud<pcl::PointXYZ>, RING_NUMBER> ground_;
+    std::array<pcl::PointCloud<pcl::PointXYZ>, RING_NUMBER> transformed_ground_;
     pcl::PointCloud<pcl::PointXYZ> obstacles_;
 
     // Fitted Lines from Douglas-Peucker Algorithm
     std::array<std::vector<pcl::PointXYZ>, RING_NUMBER> fitted_lines_;
-    std::vector<pcl::PointXYZ> ground_lines_;
+
+    // Glass
+    std::vector<Eigen::Vector4f> glass_planes_coeff_;
+
 
     // Beam Modeal
     // {azimuth, distance}
@@ -140,9 +151,8 @@ private:
     pcl::PointCloud<pcl::PointXYZ> a_test_;
     pcl::PointCloud<pcl::PointXYZ> b_test_;
     pcl::PointCloud<pcl::PointXYZ> c_test_;
+    pcl::PointCloud<pcl::PointXYZ> d_test_;
     std::vector<pcl::PointCloud<pcl::PointXYZ>> clusters_;
-
-    
 
     // Estimate Base Planar to roughly estimate LiDAR pose
     template <class PointT>
@@ -156,6 +166,9 @@ private:
                          int seed_m, int seed_n, int m, int n,
                          pcl::PointCloud<pcl::PointXYZ>& cluster,
                          std::vector<std::pair<int, int>>& grid_idx);
+    
+    // Detect Glass
+    void detectGlass_();
 
     // Extract Ground and Find Obstacles with grid method
     void extractGround_();

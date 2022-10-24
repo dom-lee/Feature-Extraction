@@ -34,24 +34,23 @@ FeatureExtractor::FeatureExtractor(lidar_setting_t lidar_setting, int mode)
     // Status
     base_plane_updated_ = false;
 
-    debugger::debugTitleTextOutput("[Feature Extractor]", "Constructed",
-                                   10, BC);
+    debugger::debugTitleTextOutput("[FeatureExtractor]", "Constructed", 10, BC);
 }
 
 void FeatureExtractor::changeSetting(feature_extractor_setting_t setting)
 {
     setting_ = setting;
-    debugger::debugTitleTextOutput("[Feature Extractor]", "Setting Changed",
-                                   10, BG);
+    debugger::debugTitleTextOutput("[FeatureExtractor]", "Setting Changed", 10, BG);
 }
 
 void FeatureExtractor::setInputCloud(
-    std::array<pcl::PointCloud<pcl::PointXYZ>, RING_NUMBER>& rings)
+    std::array<pcl::PointCloud<pcl::PointXYZI>, RING_NUMBER>& rings)
 {
     landmark_.clear();
     a_test_.clear();
     b_test_.clear();
     c_test_.clear();
+    d_test_.clear();
 
     // Estimate Base Plane
     if (!estimateBasePlane_(rings))
@@ -67,7 +66,7 @@ void FeatureExtractor::setInputCloud(
 
         // Sort Rings by azimuth
         std::sort(transformed_rings_[i].begin(), transformed_rings_[i].end(),
-            [](const pcl::PointXYZ& lhs, const pcl::PointXYZ& rhs)
+            [](const pcl::PointXYZI& lhs, const pcl::PointXYZI& rhs)
             {
                 return std::atan2(lhs.y, lhs.x) < std::atan2(rhs.y, rhs.x);
             }
@@ -79,23 +78,25 @@ void FeatureExtractor::setInputCloud(
 
 void FeatureExtractor::run()
 {
-    if (base_plane_updated_)
-    {
-        if (mode_ == Extractor_modes_t::CURB)
-        {
-            debugger::debugColorTextOutput("[Curb Extractor] Execute", 5, BW);
-            extractGround_();
-            extractCurb_();
-        }
-        else if (mode_ == Extractor_modes_t::WALL)
-        {
-            debugger::debugColorTextOutput("[Wall Extractor] Execute", 5, BW);
-            extractWall_();
-        }
-    }
-    else
+    if (!base_plane_updated_)
     {
         debugger::debugColorTextOutput("[Feature Extractor] Base Error", 10, BY);
+        return;
+    }
+
+    if (mode_ == Extractor_modes_t::CURB)
+    {
+        debugger::debugColorTextOutput("[Curb Extractor] Execute", 5, BW);
+
+        extractGround_();
+        extractCurb_();
+    }
+    else if (mode_ == Extractor_modes_t::WALL)
+    {
+        debugger::debugColorTextOutput("[Wall Extractor] Execute", 5, BW);
+        
+        extractWall_();
+        detectGlass_();
     }
 }
 
@@ -103,9 +104,12 @@ void FeatureExtractor::run()
 pcl::PointCloud<pcl::PointXYZ>::Ptr FeatureExtractor::getGround()
 {
     pcl::PointCloud<pcl::PointXYZ> ground;
-    for (int i = 0; i < ground_.size(); ++i)
+    for (int i = 0; i < transformed_ground_.size(); ++i)
     {
-        ground += ground_[i];
+        pcl::PointCloud<pcl::PointXYZ> tmp_ground;
+        pcl::transformPointCloud(transformed_ground_[i], tmp_ground,
+                                 transformation_.transpose());
+        ground += tmp_ground;
     }
 
     return ground.makeShared();
@@ -137,6 +141,11 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr FeatureExtractor::getC()
     return c_test_.makeShared();
 }
 
+pcl::PointCloud<pcl::PointXYZ>::Ptr FeatureExtractor::getD()
+{
+    return d_test_.makeShared();
+}
+
 std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> FeatureExtractor::getCluster()
 {
     std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> result;
@@ -158,11 +167,6 @@ std::vector<pcl::PointXYZ> FeatureExtractor::getFittedLines()
                             fitted_lines_[i].begin(), fitted_lines_[i].end());
     }
     return fitted_lines;
-}
-
-std::vector<pcl::PointXYZ> FeatureExtractor::getGroundLines()
-{
-    return ground_lines_;
 }
 
 std::vector<pcl::PointXYZ> FeatureExtractor::getGridNormals()
@@ -229,9 +233,9 @@ Eigen::Vector4f FeatureExtractor::getBasePlane()
     return base_coeff_;
 }
 
-Eigen::Vector4f FeatureExtractor::getCeilingPlane()
+std::vector<Eigen::Vector4f> FeatureExtractor::getGlassPlanes()
 {
-    return ceiling_coeff_;
+    return glass_planes_coeff_;
 }
 
 template <class PointT>
@@ -254,10 +258,9 @@ bool FeatureExtractor::estimateBasePlane_(
 
     for (int i = 0; i < setting_.RING_TO_FIT_BASE; ++i)
     {
-        int ring_size = rings[i].size();
-        for (int j = 0; j < ring_size; ++j)
+        for (int j = 0; j < rings[i].size(); ++j)
         {
-            pcl::PointXYZ& point = rings[i][j];
+            PointT& point = rings[i][j];
 
             double azimuth = std::atan2(point.y, point.x);
             double r = std::sqrt(std::pow(point.x, 2) + std::pow(point.y, 2));
@@ -310,8 +313,6 @@ bool FeatureExtractor::estimateBasePlane_(
             curr_ring_cloud[k].clear();
         }
     } // Finish Sampling Candidates for Base
-
-    a_test_ = base_candidate;
 
     if (base_candidate.size() < 10)
     {
@@ -396,10 +397,11 @@ void FeatureExtractor::extractWall_()
     // Save PointCloud into Grid
     for (int i = 0; i < RING_NUMBER; ++i)
     {
-        ground_[i].clear();
         for (int j = 0; j < transformed_rings_[i].size(); ++j)
         {
-            pcl::PointXYZ& point = transformed_rings_[i][j];
+            pcl::PointXYZ point(transformed_rings_[i][j].x,
+                                transformed_rings_[i][j].y,
+                                transformed_rings_[i][j].z);
 
             // Filter outside range
             if ((point.x < 0 && point.x > -2.0 && std::abs(point.y) < 0.5) ||
@@ -410,16 +412,16 @@ void FeatureExtractor::extractWall_()
             }
 
             // Visualization for Ground
-            if (point.z < -estimated_lidar_height_ + 0.2 &&
-                point.z > -estimated_lidar_height_ - 0.2)
+            if (point.z < -estimated_lidar_height_ + setting_.GROUND_DIST_THRESHOLD &&
+                point.z > -estimated_lidar_height_ - setting_.GROUND_DIST_THRESHOLD)
             {
-                ground_[i].push_back(point);
+                transformed_ground_[i].push_back(point);
                 continue;
             }
 
             // Filter Ground and Ceiling
-            if (point.z < -estimated_lidar_height_ + 0.2 ||
-                point.z > -estimated_lidar_height_ + 2.0)
+            if (point.z < -estimated_lidar_height_ + setting_.GROUND_DIST_THRESHOLD ||
+                point.z > -estimated_lidar_height_ + setting_.CEILING_HEIGHT_THRESHOLD)
             {
                 continue;
             }
@@ -432,9 +434,8 @@ void FeatureExtractor::extractWall_()
             grid_min_z[m][n] = std::min((double)point.z, grid_min_z[m][n]);
             grid_max_z[m][n] = std::max((double)point.z, grid_max_z[m][n]);
 
+            // Save Points in each cell
             grid_cloud_[m][n].push_back(point);
-
-            a_test_.push_back(point);
         }
     }
     debugger::debugColorTextOutput("Finished Saving PointCloud in Grid", 3, BK);
@@ -484,7 +485,6 @@ void FeatureExtractor::extractWall_()
     // Clustering by DFS (with checking normal)
     std::vector<std::vector<int>> grid_visited(grid_size,
                                                std::vector<int>(grid_size, 0));
-    pcl::PointCloud<pcl::PointXYZ> transformed_cluster;
     clusters_.clear();
     for (int m = 0; m < grid_size; ++m)
     {
@@ -497,7 +497,7 @@ void FeatureExtractor::extractWall_()
                 continue;
             }
 
-            transformed_cluster.clear();
+            pcl::PointCloud<pcl::PointXYZ> transformed_cluster;
             std::vector<std::pair<int, int>> index_of_cluster;
             clusterGridDFS_(grid_visited, m, n, m, n,
                             transformed_cluster, index_of_cluster);
@@ -510,7 +510,7 @@ void FeatureExtractor::extractWall_()
             // Inverse Transform from transformed_cluster to cluster
             clusters_.push_back({});
             pcl::transformPointCloud(transformed_cluster, clusters_.back(),
-                                     transformation_.inverse());
+                                     transformation_.transpose());
 
             // Estimate Wall Plane Coeff from Cluster
             pcl::PointIndices inliers;
@@ -660,13 +660,105 @@ void FeatureExtractor::clusterGridDFS_(std::vector<std::vector<int>>& grid_visit
     }
 }
 
+void FeatureExtractor::detectGlass_()
+{
+    glass_planes_coeff_.clear();
+
+    for (int i = 0; i < RING_NUMBER; ++i)
+    {
+        for (int j = 0; j < transformed_rings_[i].size(); ++j)
+        {
+            // Find start point of glass
+            pcl::PointXYZI& point_curr = transformed_rings_[i][j];
+            
+            // Filter Point that have high intensity
+            if (point_curr.intensity < setting_.GLASS_INTENSITY)
+            {
+                continue;
+            }
+            debugger::debugColorOutput("Point: ", point_curr, 8, BW);
+
+            int ring_size = transformed_rings_[i].size();
+            pcl::PointXYZI& point_prev =
+                transformed_rings_[i][(j - 1 + ring_size) % ring_size];
+            int intensity_delta = point_curr.intensity - point_prev.intensity;
+
+            // Filter Point that high intensity gradient
+            if (intensity_delta < setting_.GLASS_INTENSITY_DELTA)
+            {
+                continue;
+            }
+            debugger::debugColorOutput("Intensity Delta: ", intensity_delta, 8, BW);
+
+            pcl::PointXYZ p1;
+            p1.x = point_curr.x;
+            p1.y = point_curr.y;
+            p1.z = point_curr.z;
+
+            a_test_.push_back(p1);
+
+            // Find end point of glass
+            for (int k = j + 1; k < transformed_rings_[i].size(); ++k)
+            {
+                double intensity_delta_tmp = transformed_rings_[i][k - 1].intensity -
+                                             transformed_rings_[i][k].intensity;
+
+                if (intensity_delta_tmp > setting_.GLASS_INTENSITY_DELTA ||
+                    transformed_rings_[i][k].intensity < setting_.GLASS_INTENSITY)
+                {
+                    // Compute Middle Point
+                    Eigen::Vector4f transformed_glass_point;
+                    transformed_glass_point << 
+                        (point_curr.x + transformed_rings_[i][k - 1].x) / 2,
+                        (point_curr.y + transformed_rings_[i][k - 1].y) / 2,
+                        (point_curr.z + transformed_rings_[i][k - 1].z) / 2,
+                        1;
+
+                    // Re-Transform
+                    Eigen::Vector4f glass_point = transformation_.transpose() *
+                                                  transformed_glass_point;
+
+                    // a(x - a) + b(x - b) + c(x - c) = 0
+                    double a = glass_point(0);
+                    double b = glass_point(1);
+                    double c = glass_point(2);
+                    double d = -std::pow(a, 2) - std::pow(b, 2) - std::pow(c, 2);
+
+                    Eigen::Vector4f glass_plane_coeff(a, b, c, d);
+                    glass_planes_coeff_.push_back(glass_plane_coeff);
+
+                    j = k - 1;
+
+                    pcl::PointXYZ p2;
+                    p2.x = glass_point(0);
+                    p2.y = glass_point(1);
+                    p2.z = glass_point(2);
+
+                    b_test_.push_back(p2);
+
+                    pcl::PointXYZ p3;
+                    p3.x = transformed_rings_[i][k - 1].x;
+                    p3.y = transformed_rings_[i][k - 1].y;
+                    p3.z = transformed_rings_[i][k - 1].z;
+                    c_test_.push_back(p3);
+
+
+
+
+                    break;
+                }
+            }
+        }
+    }
+}
+
 void FeatureExtractor::extractGround_()
 {
     // Clear Old Data
     obstacles_.clear();
     for (int i = 0; i < RING_NUMBER; ++i)
     {
-        ground_[i].clear();
+        transformed_ground_[i].clear();
     }
 
     // Grid Specification (Grid size is odd)
@@ -696,7 +788,9 @@ void FeatureExtractor::extractGround_()
         // Pre-Compute Grid
         for (int j = 0; j < ring_size; ++j)
         {
-            pcl::PointXYZ& point = transformed_rings_[i][j];
+            pcl::PointXYZ point(transformed_rings_[i][j].x,
+                                transformed_rings_[i][j].y,
+                                transformed_rings_[i][j].z);
 
             // Filter outside points
             if ((point.x < 2.0 && point.x > -5.0 && std::abs(point.y) < 3.0) ||
@@ -723,7 +817,7 @@ void FeatureExtractor::extractGround_()
             grid_min_z[m][n] = std::min((double)point.z, grid_min_z[m][n]);
             grid_max_z[m][n] = std::max((double)point.z, grid_max_z[m][n]);
 
-            // Update PointCloud in Grid
+            // Update PointCloud in Grid (Label: Ring_ID)
             pcl::PointXYZL point_with_label;
             point_with_label.x = point.x;
             point_with_label.y = point.y;
@@ -840,9 +934,9 @@ void FeatureExtractor::extractGround_()
                                                max_z_neighbor_ground);
             if (grid_height_diff > setting_.OBSTACLE_THRESHOLD ||
                 grid_max_z[m][n] > max_z_neighbor_ground +
-                                   setting_.GROUND_THRESHOLD ||
+                                   setting_.GROUND_DIST_THRESHOLD ||
                 grid_min_z[m][n] < min_z_neighbor_ground - 
-                                   3 * setting_.GROUND_THRESHOLD)
+                                   3 * setting_.GROUND_DIST_THRESHOLD)
             {
                 grid_ground_[m][n] = -1;
 
@@ -883,16 +977,16 @@ void FeatureExtractor::extractGround_()
                 }
                 else
                 {
-                    ground_[point_with_label.label].push_back(point);
+                    transformed_ground_[point_with_label.label].push_back(point);
                 }
             }
         }
     }
 
     // Sort Point Cloud by Couter Clock-wisely
-    for (int i = 0; i < ground_.size(); ++i)
+    for (int i = 0; i < RING_NUMBER; ++i)
     {
-        std::sort(ground_[i].begin(), ground_[i].end(),
+        std::sort(transformed_ground_[i].begin(), transformed_ground_[i].end(),
             [](const pcl::PointXYZ& lhs, const pcl::PointXYZ& rhs)
             {
                 return std::atan2(lhs.y, lhs.x) < std::atan2(rhs.y, rhs.x);
@@ -903,113 +997,114 @@ void FeatureExtractor::extractGround_()
 
 void FeatureExtractor::extractCurb_()
 {
-    //for (int i = 0; i < ground_.size(); ++i)
-    //{
-        //fitted_lines_[i].clear();
-        //fitPointCloud_(ground_[i], fitted_lines_[i]);
-        //for (int k = 1; k < (int)fitted_lines_[i].size() / 2 - 1; ++k)
-        //{
-            //// Assume current line is sidewalk
-            //pcl::PointXYZ& start_point = fitted_lines_[i][2 * k];
-            //pcl::PointXYZ& end_point   = fitted_lines_[i][2 * k + 1];
+    pcl::PointCloud<pcl::PointXYZ> transformed_landmark;
+    for (int i = 0; i < transformed_ground_.size(); ++i)
+    {
+        fitted_lines_[i].clear();
+        fitPointCloud_(transformed_ground_[i], fitted_lines_[i]);
+        for (int k = 1; k < (int)fitted_lines_[i].size() / 2 - 1; ++k)
+        {
+            // Assume current line is sidewalk
+            pcl::PointXYZ start_point = fitted_lines_[i][2 * k];
+            pcl::PointXYZ end_point   = fitted_lines_[i][2 * k + 1];
 
-            //Eigen::Vector3f start_curr = fitted_lines_[i][k].getVector3fMap();
-            //Eigen::Vector3f end_curr   = fitted_lines_[i][k + 1].getVector3fMap();
-            //pcl::PointXYZ start_point(start_curr(0), start_curr(1), start_curr(2));
-            //pcl::PointXYZ end_point(end_curr(0), end_curr(1), end_curr(2));
+            Eigen::Vector3f start_curr = start_point.getVector3fMap();
+            Eigen::Vector3f end_curr   = end_point.getVector3fMap();
 
-            //// Adjacent Downsampled lines
-            //Eigen::Vector3f& start_next = fitted_lines_[i][k + 1].first;
-            //Eigen::Vector3f& end_next   = fitted_lines_[i][k + 1].second;
-            //Eigen::Vector3f& start_prev = fitted_lines_[i][k - 1].first;
-            //Eigen::Vector3f& end_prev   = fitted_lines_[i][k - 1].second;
+            // Adjacent Downsampled lines
+            Eigen::Vector3f start_prev = fitted_lines_[i][2 * k - 2].getVector3fMap();
+            Eigen::Vector3f end_prev   = fitted_lines_[i][2 * k - 1].getVector3fMap();
+            Eigen::Vector3f start_next = fitted_lines_[i][2 * k + 2].getVector3fMap();
+            Eigen::Vector3f end_next   = fitted_lines_[i][2 * k + 3].getVector3fMap();
 
-            //// Vector for using angular threshold
-            //Eigen::Vector2f v_a, v_b, v_c;
-            //double angle_road_curb;
+            // Vector for using angular threshold
+            Eigen::Vector2f v_a, v_b, v_c;
+            double angle_road_curb;
 
-            //// Discontinued Curb
-            //// Left: Sidewalk | Right: Road
-            //double azimuth_diff_prev = std::atan2(start_curr(1), start_curr(0)) - 
-                                       //std::atan2(end_prev(1), end_prev(0));
-            //v_a = (start_prev - end_prev).head(2); // Road
-            //v_b = (start_curr - end_prev).head(2); // Curb
-            //angle_road_curb = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
-            //if (azimuth_diff_prev < setting_.DISCONTINUITY_AZIMUTH &&
-                //start_curr(2) - end_prev(2) > setting_.CURB_HEIGHT_THRESHOLD &&
-                //angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
-                //end_prev.norm() > start_curr.norm() &&
-                //(start_curr - end_curr).norm() > setting_.SIDEWALK_MIN_LENGTH &&
-                //(start_curr - end_curr).norm() < setting_.SIDEWALK_MAX_LENGTH)
-            //{
-                //transformed_landmark.push_back(start_point);
-                //continue;
-            //}
+            // Discontinued Curb
+            // Left: Sidewalk | Right: Road
+            double azimuth_diff_prev = std::atan2(start_curr(1), start_curr(0)) - 
+                                       std::atan2(end_prev(1), end_prev(0));
+            v_a = (start_prev - end_prev).head(2); // Road
+            v_b = (start_curr - end_prev).head(2); // Curb
+            angle_road_curb = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
+            if (azimuth_diff_prev < setting_.DISCONTINUITY_AZIMUTH &&
+                start_curr(2) - end_prev(2) > setting_.CURB_HEIGHT_THRESHOLD &&
+                angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
+                end_prev.norm() > start_curr.norm() &&
+                (start_curr - end_curr).norm() > setting_.SIDEWALK_MIN_LENGTH &&
+                (start_curr - end_curr).norm() < setting_.SIDEWALK_MAX_LENGTH)
+            {
+                transformed_landmark.push_back(start_point);
+                a_test_.push_back(start_point);
+                continue;
+            }
             
-            //// Discontinued Curb
-            //// Left: Road | Right: Sidewalk
-            //double azimuth_diff_next = std::atan2(start_next(1), start_next(0)) -
-                                       //std::atan2(end_curr(1), end_curr(0));
-            //v_a = (end_next - start_next).head(2); // Road
-            //v_b = (end_curr - start_next).head(2); // Curb 
-            //angle_road_curb = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
-            //if (azimuth_diff_next < setting_.DISCONTINUITY_AZIMUTH &&
-                //end_curr(2) - start_next(2) > setting_.CURB_HEIGHT_THRESHOLD &&
-                //angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
-                //start_next.norm() > end_curr.norm() &&
-                //(start_curr - end_curr).norm() > setting_.SIDEWALK_MIN_LENGTH &&
-                //(start_curr - end_curr).norm() < setting_.SIDEWALK_MAX_LENGTH)
-            //{
-                //transformed_landmark.push_back(end_point);
-                //continue;
-            //}
+            // Discontinued Curb
+            // Left: Road | Right: Sidewalk
+            double azimuth_diff_next = std::atan2(start_next(1), start_next(0)) -
+                                       std::atan2(end_curr(1), end_curr(0));
+            v_a = (end_next - start_next).head(2); // Road
+            v_b = (end_curr - start_next).head(2); // Curb 
+            angle_road_curb = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
+            if (azimuth_diff_next < setting_.DISCONTINUITY_AZIMUTH &&
+                end_curr(2) - start_next(2) > setting_.CURB_HEIGHT_THRESHOLD &&
+                angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
+                start_next.norm() > end_curr.norm() &&
+                (start_curr - end_curr).norm() > setting_.SIDEWALK_MIN_LENGTH &&
+                (start_curr - end_curr).norm() < setting_.SIDEWALK_MAX_LENGTH)
+            {
+                transformed_landmark.push_back(end_point);
+                b_test_.push_back(end_point);
+                continue;
+            }
            
-            //// Continued Curb
-            //// Left: Sidewalk | Center: Curb | Right: Road
-            //v_a = (start_prev - end_prev).head(2); // Road
-            //v_b = (end_curr - start_curr).head(2); // Curb
-            //angle_road_curb = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
-            //if (azimuth_diff_prev < setting_.DISCONTINUITY_AZIMUTH &&
-                //azimuth_diff_next < setting_.DISCONTINUITY_DISTANCE &&
-                //end_curr(2) - start_curr(2) > setting_.CURB_HEIGHT_THRESHOLD &&
-                //end_curr(2) - end_prev(2) > setting_.CURB_HEIGHT_THRESHOLD &&
-                //angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
-                //start_curr.norm() > end_curr.norm() &&
-                //(start_curr - end_prev).norm() < setting_.DISCONTINUITY_DISTANCE &&
-                ////(end_curr - start_next).norm() < setting_.DISCONTINUITY_DISTANCE &&
-                //(start_next - end_next).norm() > setting_.SIDEWALK_MIN_LENGTH &&
-                //(start_next - end_next).norm() < setting_.SIDEWALK_MAX_LENGTH)
-            //{
-                //transformed_landmark.push_back(start_point);
-                //continue;
-            //}
-
-            //// Continued Curb
-            //// Left: Road | Center: Curb | Right: Sidewalk
-            //v_a = (end_next - start_next).head(2); // Road
-            //v_b = (start_curr - end_curr).head(2); // Curb
-            //angle_road_curb = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
-            //if (azimuth_diff_next < setting_.DISCONTINUITY_AZIMUTH &&
-                //azimuth_diff_prev < setting_.DISCONTINUITY_AZIMUTH &&
-                //start_curr(2) - end_curr(2) > setting_.CURB_HEIGHT_THRESHOLD &&
-                //start_curr(2) - start_next(2) > setting_.CURB_HEIGHT_THRESHOLD &&
-                //angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
-                //end_curr.norm() > start_curr.norm() &&
+            // Continued Curb
+            // Left: Sidewalk | Center: Curb | Right: Road
+            v_a = (start_prev - end_prev).head(2); // Road
+            v_b = (end_curr - start_curr).head(2); // Curb
+            angle_road_curb = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
+            if (azimuth_diff_prev < setting_.DISCONTINUITY_AZIMUTH &&
+                azimuth_diff_next < setting_.DISCONTINUITY_DISTANCE &&
+                end_curr(2) - start_curr(2) > setting_.CURB_HEIGHT_THRESHOLD &&
+                end_curr(2) - end_prev(2) > setting_.CURB_HEIGHT_THRESHOLD &&
+                angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
+                start_curr.norm() > end_curr.norm() &&
+                (start_curr - end_prev).norm() < setting_.DISCONTINUITY_DISTANCE &&
                 //(end_curr - start_next).norm() < setting_.DISCONTINUITY_DISTANCE &&
-                //(start_curr - end_prev).norm() < setting_.DISCONTINUITY_DISTANCE &&
-                //(end_prev - start_prev).norm() > setting_.SIDEWALK_MIN_LENGTH &&
-                //(end_prev - start_prev).norm() < setting_.SIDEWALK_MAX_LENGTH)
-            //{
-                //transformed_landmark.push_back(end_point);
-                //continue;
-            //}
-        //}
-    //}
+                (start_next - end_next).norm() > setting_.SIDEWALK_MIN_LENGTH &&
+                (start_next - end_next).norm() < setting_.SIDEWALK_MAX_LENGTH)
+            {
+                transformed_landmark.push_back(start_point);
+                c_test_.push_back(start_point);
+                continue;
+            }
 
-    //// Restoration
-    //landmark_.clear();
-    //pcl::transformPointCloud(transformed_landmark, landmark_,
-                             //transformation_.transpose());
+            // Continued Curb
+            // Left: Road | Center: Curb | Right: Sidewalk
+            v_a = (end_next - start_next).head(2); // Road
+            v_b = (start_curr - end_curr).head(2); // Curb
+            angle_road_curb = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
+            if (azimuth_diff_next < setting_.DISCONTINUITY_AZIMUTH &&
+                azimuth_diff_prev < setting_.DISCONTINUITY_AZIMUTH &&
+                start_curr(2) - end_curr(2) > setting_.CURB_HEIGHT_THRESHOLD &&
+                start_curr(2) - start_next(2) > setting_.CURB_HEIGHT_THRESHOLD &&
+                angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
+                end_curr.norm() > start_curr.norm() &&
+                (end_curr - start_next).norm() < setting_.DISCONTINUITY_DISTANCE &&
+                (start_curr - end_prev).norm() < setting_.DISCONTINUITY_DISTANCE &&
+                (end_prev - start_prev).norm() > setting_.SIDEWALK_MIN_LENGTH &&
+                (end_prev - start_prev).norm() < setting_.SIDEWALK_MAX_LENGTH)
+            {
+                transformed_landmark.push_back(end_point);
+                d_test_.push_back(end_point);
+                continue;
+            }
+        }
+    }
+    // Transform Back
+    pcl::transformPointCloud(transformed_landmark, landmark_,
+                             transformation_.transpose());
 }
 
 void FeatureExtractor::estimateRoadModel_()

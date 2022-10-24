@@ -3,6 +3,10 @@
 
 typedef struct feature_extractor_setting
 {
+    // Parameters for Grid
+    double GRID_LENGTH;
+    int    GRID_RANGE;
+
     // Parameters for Base Plane Estimation
     int    RING_TO_FIT_BASE;
     double GRADIENT_THRESHOLD;
@@ -17,6 +21,7 @@ typedef struct feature_extractor_setting
     double GROUND_ANGLE_THRESHOLD;
 
     // Parameters for Wall Extraction
+    double CEILING_HEIGHT_THRESHOLD;
     double SECTION_NUMBER;
     double WALL_HEIGHT_THRESHOLD;
     double WALL_FIT_THRESHOLD;
@@ -26,12 +31,12 @@ typedef struct feature_extractor_setting
     int    SMOOTH_WINDOW_SIZE;
     double SMOOTH_THRESHOLD;
 
-    // Parameters for Plane RANSAC
-    double FIT_PLANE_THRESHOLD;
+    // Parameters for Glass Detection
+    int    GLASS_INTENSITY;
+    int    GLASS_INTENSITY_DELTA;
+
 
     // Parameters for Ground Extraction
-    double GRID_LENGTH;
-    int    GRID_RANGE;
     double DISCONTINUITY_HEIGHT;
     double OBSTACLE_THRESHOLD;
     double GROUND_THRESHOLD;

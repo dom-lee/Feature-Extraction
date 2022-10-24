@@ -19,6 +19,7 @@
 // ROS
 #include <ros/ros.h>
 #include <tf/transform_listener.h>
+//#include <tf/LinearMath/Quaternion.h> // tf::quatRotate
 #include <pcl_ros/impl/transforms.hpp>
 
 // Dynamic Configuration
@@ -37,6 +38,7 @@
 #include <sensor_msgs/point_cloud2_iterator.h> // PointCloud2ConstIterator
 #include <geometry_msgs/PointStamped.h>
 #include <visualization_msgs/Marker.h>
+#include <visualization_msgs/MarkerArray.h>
 
 // Main Algorithm
 #include "feature_extraction/feature_extractor.h"
@@ -65,7 +67,6 @@ private:
 
     // Subscriber
     std::string pointcloud_topic_; 
-
     ros::Subscriber point_cloud_sub_;
     ros::Subscriber clicked_point_sub_;
 
@@ -80,6 +81,7 @@ private:
     ros::Publisher a_pub_;
     ros::Publisher b_pub_;
     ros::Publisher c_pub_;
+    ros::Publisher d_pub_;
 
     std::vector<ros::Publisher> cluster_pubs_;
 
@@ -91,7 +93,9 @@ private:
     ros::Publisher middle_beam_pub_;
 
     ros::Publisher base_plane_pub_;
-    ros::Publisher ceiling_plane_pub_;
+
+    ros::Publisher glass_planes_pub_;
+
 
     // Paramters
     int driver_mode_;
@@ -103,7 +107,7 @@ private:
     pcl::PointCloud<pcl::PointXYZ> raw_cloud_;
     std::deque<pcl::PointCloud<pcl::PointXYZ>> cloud_odom_;
     pcl::PointCloud<pcl::PointXYZ> accumulated_cloud_;
-    std::array<pcl::PointCloud<pcl::PointXYZ>, VELODYNE_RING_NUMBER> rings_; 
+    std::array<pcl::PointCloud<pcl::PointXYZI>, VELODYNE_RING_NUMBER> rings_; 
     ros::Time cloud_msg_stamp_;
 
     void getCloudCallback_(const sensor_msgs::PointCloud2ConstPtr& cloud_msg);
@@ -121,6 +125,10 @@ private:
     void visualizePlane_(ros::Publisher& publisher,
                          int id, std::string name,
                          Eigen::Vector4f plane_coeff);
+
+    void visualizePlanes_(ros::Publisher& publisher,
+                          int id, std::string name,
+                          std::vector<Eigen::Vector4f> planes_coeff);
 
     bool getParameters_();
 
