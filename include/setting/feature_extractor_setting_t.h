@@ -13,7 +13,8 @@ typedef struct feature_extractor_setting
     double BASE_FIT_THRESHOLD;
 
     // Parameters for Fitting Lines
-    double DISCONTINUITY_DISTANCE;
+    double AZIMUTH_RESOLUTION;
+    double DISCONTINUITY;
     double EPSILON;
 
     // Parameters for Filtering Ground Lines
@@ -28,9 +29,6 @@ typedef struct feature_extractor_setting
     double CLUSTER_ANGLE_THRESHOLD;
     double CLUSTER_DIST_THRESHOLD;
 
-    int    SMOOTH_WINDOW_SIZE;
-    double SMOOTH_THRESHOLD;
-
     // Parameters for Glass Detection
     int    GLASS_INTENSITY;
     int    GLASS_INTENSITY_DELTA;
@@ -43,9 +41,6 @@ typedef struct feature_extractor_setting
 
     // Parameters for Curb Extraction
     double DISCONTINUITY_AZIMUTH;
-    double SMOOTHNESS_THRESHOLD;
-    int    SMOOTH_COUNT;
-    double CONTINUITY_ANGLE;
     double CURB_HEIGHT_THRESHOLD;
     double CURB_ANGLE_THRESHOLD;
     double SIDEWALK_MIN_LENGTH;

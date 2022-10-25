@@ -71,7 +71,7 @@ Visualization Manager:
       Color: 255; 255; 255
       Color Transformer: Intensity
       Decay Time: 0
-      Enabled: true
+      Enabled: false
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Min Color: 0; 0; 0
@@ -86,7 +86,7 @@ Visualization Manager:
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
-      Value: true
+      Value: false
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -127,7 +127,7 @@ Visualization Manager:
       Color: 138; 226; 52
       Color Transformer: FlatColor
       Decay Time: 0
-      Enabled: true
+      Enabled: false
       Invert Rainbow: false
       Max Color: 115; 210; 22
       Min Color: 0; 0; 0
@@ -142,7 +142,7 @@ Visualization Manager:
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
-      Value: true
+      Value: false
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -191,7 +191,7 @@ Visualization Manager:
       Position Transformer: XYZ
       Queue Size: 10
       Selectable: true
-      Size (Pixels): 10
+      Size (Pixels): 20
       Size (m): 0.10000000149011612
       Style: Points
       Topic: /feature_extraction/a
@@ -219,7 +219,7 @@ Visualization Manager:
       Position Transformer: XYZ
       Queue Size: 10
       Selectable: true
-      Size (Pixels): 10
+      Size (Pixels): 20
       Size (m): 0.009999999776482582
       Style: Points
       Topic: /feature_extraction/b
@@ -247,7 +247,7 @@ Visualization Manager:
       Position Transformer: XYZ
       Queue Size: 10
       Selectable: true
-      Size (Pixels): 3
+      Size (Pixels): 20
       Size (m): 0.009999999776482582
       Style: Points
       Topic: /feature_extraction/c
@@ -275,7 +275,7 @@ Visualization Manager:
       Position Transformer: XYZ
       Queue Size: 10
       Selectable: true
-      Size (Pixels): 10
+      Size (Pixels): 20
       Size (m): 0.009999999776482582
       Style: Points
       Topic: /feature_extraction/d
@@ -891,7 +891,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/XYOrbit
-      Distance: 7.527644157409668
+      Distance: 72.6449203491211
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -899,17 +899,17 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: -1.671175479888916
-        Y: 7.595716953277588
-        Z: 1.9908975446014665e-06
+        X: -4.38736629486084
+        Y: 4.4212846755981445
+        Z: 6.901740562170744e-06
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.0197968482971191
+      Pitch: 1.5697963237762451
       Target Frame: <Fixed Frame>
-      Yaw: 6.088573455810547
+      Yaw: 6.202219486236572
     Saved: ~
 Window Geometry:
   Displays:
@@ -929,5 +929,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 1860
-  X: 807
-  Y: 1467
+  X: 669
+  Y: 1827

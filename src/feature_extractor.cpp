@@ -109,7 +109,8 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr FeatureExtractor::getGround()
         pcl::PointCloud<pcl::PointXYZ> tmp_ground;
         pcl::transformPointCloud(transformed_ground_[i], tmp_ground,
                                  transformation_.transpose());
-        ground += tmp_ground;
+        //ground += tmp_ground;
+        ground += transformed_ground_[i];
     }
 
     return ground.makeShared();
@@ -695,8 +696,6 @@ void FeatureExtractor::detectGlass_()
             p1.y = point_curr.y;
             p1.z = point_curr.z;
 
-            a_test_.push_back(p1);
-
             // Find end point of glass
             for (int k = j + 1; k < transformed_rings_[i].size(); ++k)
             {
@@ -734,14 +733,10 @@ void FeatureExtractor::detectGlass_()
                     p2.y = glass_point(1);
                     p2.z = glass_point(2);
 
-                    b_test_.push_back(p2);
-
                     pcl::PointXYZ p3;
                     p3.x = transformed_rings_[i][k - 1].x;
                     p3.y = transformed_rings_[i][k - 1].y;
                     p3.z = transformed_rings_[i][k - 1].z;
-                    c_test_.push_back(p3);
-
 
 
 
@@ -825,12 +820,6 @@ void FeatureExtractor::extractGround_()
             point_with_label.label = i;
 
             grid_cloud[m][n].push_back(point_with_label);
-
-            // Filter Grass with Smooth Filter (ex. Grass)
-            if (i < 3)
-            {
-                continue;
-            }
         }
     } // End of Pre-Compute Grid
 
@@ -1065,12 +1054,12 @@ void FeatureExtractor::extractCurb_()
             v_b = (end_curr - start_curr).head(2); // Curb
             angle_road_curb = std::acos(v_a.dot(v_b) / v_a.norm() / v_b.norm());
             if (azimuth_diff_prev < setting_.DISCONTINUITY_AZIMUTH &&
-                azimuth_diff_next < setting_.DISCONTINUITY_DISTANCE &&
+                //azimuth_diff_next < setting_.DISCONTINUITY_DISTANCE &&
                 end_curr(2) - start_curr(2) > setting_.CURB_HEIGHT_THRESHOLD &&
                 end_curr(2) - end_prev(2) > setting_.CURB_HEIGHT_THRESHOLD &&
                 angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
                 start_curr.norm() > end_curr.norm() &&
-                (start_curr - end_prev).norm() < setting_.DISCONTINUITY_DISTANCE &&
+                //(start_curr - end_prev).norm() < setting_.DISCONTINUITY_DISTANCE &&
                 //(end_curr - start_next).norm() < setting_.DISCONTINUITY_DISTANCE &&
                 (start_next - end_next).norm() > setting_.SIDEWALK_MIN_LENGTH &&
                 (start_next - end_next).norm() < setting_.SIDEWALK_MAX_LENGTH)
@@ -1091,8 +1080,8 @@ void FeatureExtractor::extractCurb_()
                 start_curr(2) - start_next(2) > setting_.CURB_HEIGHT_THRESHOLD &&
                 angle_road_curb < setting_.CURB_ANGLE_THRESHOLD &&
                 end_curr.norm() > start_curr.norm() &&
-                (end_curr - start_next).norm() < setting_.DISCONTINUITY_DISTANCE &&
-                (start_curr - end_prev).norm() < setting_.DISCONTINUITY_DISTANCE &&
+                //(end_curr - start_next).norm() < setting_.DISCONTINUITY_DISTANCE &&
+                //(start_curr - end_prev).norm() < setting_.DISCONTINUITY_DISTANCE &&
                 (end_prev - start_prev).norm() > setting_.SIDEWALK_MIN_LENGTH &&
                 (end_prev - start_prev).norm() < setting_.SIDEWALK_MAX_LENGTH)
             {
@@ -1371,11 +1360,14 @@ void FeatureExtractor::fitPointCloud_(const pcl::PointCloud<PointT>& in_ring,
         Eigen::Vector3f point_curr = (*it).getVector3fMap();
         Eigen::Vector3f point_next = (*(it + 1)).getVector3fMap();
         
-        double distance_diff = (point_curr - point_next).norm();
+        // Distance in XY vector space
+        double distance_diff = (point_curr.head(2) - point_next.head(2)).norm();
+        double distance_threshold = point_curr.head(2).norm() *
+                                    setting_.AZIMUTH_RESOLUTION * 
+                                    setting_.DISCONTINUITY;
 
         // Execute Douglas-Peucker for each cluster
-        if (distance_diff > setting_.DISCONTINUITY_DISTANCE ||
-            std::next(it, 2) == in_ring.end())
+        if (distance_diff > distance_threshold || std::next(it, 2) == in_ring.end())
         {
             // Skip cluster less than 3 points
             if (std::distance(start_iter, it) < 2)
@@ -1385,12 +1377,20 @@ void FeatureExtractor::fitPointCloud_(const pcl::PointCloud<PointT>& in_ring,
             }
 
             // Execute Douglas-Peucker Fitting Algorithm
-            auto fitted_line = douglasPeucker<PointT>(start_iter, it,
-                                                      setting_.EPSILON);
+            std::vector<PointT> fitted_line =
+                douglasPeucker<PointT>(start_iter, it, setting_.EPSILON);
             
             // Save Line Segment
             for (int i = 0; i < (int)fitted_line.size() - 1; ++i)
             {
+                // Skip short(noisy) line
+                double line_length = pcl::euclideanDistance(fitted_line[i],
+                                                            fitted_line[i + 1]);
+                if (line_length < 0.5)
+                {
+                    continue;
+                }
+
                 out_line_list.push_back(fitted_line[i]);
                 out_line_list.push_back(fitted_line[i + 1]);
             }

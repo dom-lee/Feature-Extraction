@@ -20,8 +20,7 @@ Driver::Driver(ros::NodeHandle& nh)
     {
         debugger::debugTitleTextOutput("[Driver]", "NOTICE!!!!", 10, BR, BOLD);
         debugger::debugColorOutput("[Driver] Not enough parameters: ",
-                "Using default values", 10, BR, BOLD);
-        utils::pressEnterToContinue();
+                                   "Using default values", 10, BR, BOLD);
     }
     else
     {
@@ -29,9 +28,8 @@ Driver::Driver(ros::NodeHandle& nh)
     }
 
     // Subscriber
-    point_cloud_sub_ = nh_.subscribe(pointcloud_topic_, 1,
-                                     &Driver::getCloudCallback_, this);
-
+    point_cloud_sub_   = nh_.subscribe(pointcloud_topic_, 1,
+                                       &Driver::getCloudCallback_, this);
     clicked_point_sub_ = nh_.subscribe("/clicked_point", 1, 
                                        &Driver::getClickedPointCallBack_, this);
 
@@ -79,12 +77,15 @@ Driver::Driver(ros::NodeHandle& nh)
         if (!rings_[0].empty())
         {
             ROS_INFO_ONCE("[Driver] Received Point Cloud");
+            
+            // Configuration Chage
             if (is_extractor_setting_changed_)
             {
                 feature_extractor.changeSetting(extractor_setting_);
                 is_extractor_setting_changed_ = false;
             }
 
+            // Execute Feature Extraction
             auto start_time = timing::getCurrentTime();
 
             feature_extractor.setInputCloud(rings_);
@@ -93,6 +94,7 @@ Driver::Driver(ros::NodeHandle& nh)
             ROS_INFO("%f", timing::spendElapsedTime(start_time));
 
 
+            // Visualize and Publish
             publishPointCloud_<pcl::PointXYZ>(ground_pub_,
                                               feature_extractor.getGround());
             publishPointCloud_<pcl::PointXYZ>(obstacles_pub_,
@@ -113,7 +115,7 @@ Driver::Driver(ros::NodeHandle& nh)
 
             //visualizeLines_(grid_normals_pub_, 1, "grid_normals", 0.1,
                             //1.0f, 0.0f, 1.0f, feature_extractor.getGridNormals());
-            visualizeLines_(fitted_lines_pub_, 1, "fitted lines", 0.2,
+            visualizeLines_(fitted_lines_pub_, 1, "fitted lines", 0.1,
                             1.0f, 0.0f, 1.0f, feature_extractor.getFittedLines());
             ////visualizeLines_(bottom_beam_pub_, 1, "bottom beam", 1.0f, 0.0f, 1.0f,
                            ////feature_extractor.getBottomBeam());
@@ -452,7 +454,8 @@ void Driver::reconfigParams_(feature_extraction::feature_extractionConfig& confi
     extractor_setting_.BASE_FIT_THRESHOLD       = config.base_fit_threshold;
     
     // Parameters for Fitting Lines
-    extractor_setting_.DISCONTINUITY_DISTANCE   = config.discontinuity_distance;
+    extractor_setting_.AZIMUTH_RESOLUTION       = config.azimuth_resolution;
+    extractor_setting_.DISCONTINUITY            = config.discontinuity;
     extractor_setting_.EPSILON                  = config.epsilon;
 
     // Parameters for Filtering Ground Lines
@@ -480,9 +483,6 @@ void Driver::reconfigParams_(feature_extraction::feature_extractionConfig& confi
 
     // Parameters for Curb Extraction
     extractor_setting_.DISCONTINUITY_AZIMUTH    = config.discontinuity_azimuth;
-    extractor_setting_.SMOOTHNESS_THRESHOLD     = config.smoothness_threshold;
-    extractor_setting_.SMOOTH_COUNT             = config.smooth_count;
-    extractor_setting_.CONTINUITY_ANGLE         = config.continuity_angle;
     extractor_setting_.CURB_HEIGHT_THRESHOLD    = config.curb_height_threshold;
     extractor_setting_.CURB_ANGLE_THRESHOLD     = config.curb_angle_threshold;
     extractor_setting_.SIDEWALK_MIN_LENGTH      = config.sidewalk_min_length;
@@ -529,4 +529,6 @@ void Driver::getClickedPointCallBack_(
     std::cout << "Ring ID: " << ring_id << std::endl;
     std::cout << "Distance: " << distance << std::endl;
     std::cout << "Azimuth :  " << azimuth << std::endl;  
+
+    sleep(5);
 }
