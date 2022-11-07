@@ -113,8 +113,8 @@ Driver::Driver(ros::NodeHandle& nh)
                 //publishPointCloud_<pcl::PointXYZ>(cluster_pubs_[i], cluster_ptrs[i]);
             //}
 
-            //visualizeLines_(grid_normals_pub_, 1, "grid_normals", 0.1,
-                            //1.0f, 0.0f, 1.0f, feature_extractor.getGridNormals());
+            visualizeLines_(grid_normals_pub_, 1, "grid_normals", 0.1,
+                            1.0f, 0.0f, 1.0f, feature_extractor.getGridNormals());
             visualizeLines_(fitted_lines_pub_, 1, "fitted lines", 0.1,
                             1.0f, 0.0f, 1.0f, feature_extractor.getFittedLines());
             ////visualizeLines_(bottom_beam_pub_, 1, "bottom beam", 1.0f, 0.0f, 1.0f,
@@ -444,58 +444,61 @@ void Driver::reconfigParams_(feature_extraction::feature_extractionConfig& confi
     ROS_INFO_THROTTLE(1.0, "[Feature Extractor] new parameteres requested");
     is_extractor_setting_changed_ = true;
 
+    // Parameters for filtering raw Point Cloud
+    extractor_setting_.HEIGHT_THRESHOLD        = config.height_threshold;
+
     // Parameters for Grid
-    extractor_setting_.GRID_LENGTH              = config.grid_length;
-    extractor_setting_.GRID_RANGE               = config.grid_range;
+    extractor_setting_.GRID_LENGTH             = config.grid_length;
+    extractor_setting_.GRID_RANGE              = config.grid_range;
 
     // Parameters for Base Planar Estimation
-    extractor_setting_.RING_TO_FIT_BASE         = config.ring_to_fit_base;
-    extractor_setting_.GRADIENT_THRESHOLD       = config.gradient_threshold;
-    extractor_setting_.BASE_FIT_THRESHOLD       = config.base_fit_threshold;
+    extractor_setting_.RING_TO_FIT_BASE        = config.ring_to_fit_base;
+    extractor_setting_.GRADIENT_THRESHOLD      = config.gradient_threshold;
+    extractor_setting_.BASE_FIT_THRESHOLD      = config.base_fit_threshold;
     
     // Parameters for Fitting Lines
-    extractor_setting_.AZIMUTH_RESOLUTION       = config.azimuth_resolution;
-    extractor_setting_.DISCONTINUITY            = config.discontinuity;
-    extractor_setting_.EPSILON                  = config.epsilon;
+    extractor_setting_.AZIMUTH_RESOLUTION      = config.azimuth_resolution;
+    extractor_setting_.DISCONTINUITY           = config.discontinuity;
+    extractor_setting_.EPSILON                 = config.epsilon;
 
     // Parameters for Filtering Ground Lines
-    extractor_setting_.GROUND_DIST_THRESHOLD    = config.ground_dist_threshold;
-    extractor_setting_.GROUND_ANGLE_THRESHOLD   = config.ground_angle_threshold;
+    extractor_setting_.GROUND_DIST_THRESHOLD   = config.ground_dist_threshold;
+    extractor_setting_.GROUND_ANGLE_THRESHOLD  = config.ground_angle_threshold;
 
     // Parameters for Wall Extraction
-    extractor_setting_.CEILING_HEIGHT_THRESHOLD = config.ceiling_height_threshold;
-    extractor_setting_.SECTION_NUMBER           = config.section_number;
-    extractor_setting_.WALL_HEIGHT_THRESHOLD    = config.wall_height_threshold;
-    extractor_setting_.WALL_FIT_THRESHOLD       = config.wall_fit_threshold;
-    extractor_setting_.CLUSTER_ANGLE_THRESHOLD  = config.cluster_angle_threshold;
-    extractor_setting_.CLUSTER_DIST_THRESHOLD   = config.cluster_dist_threshold;
+    extractor_setting_.INTERPOLATION_LENGTH    = config.interpolation_length;
+    extractor_setting_.SECTION_NUMBER          = config.section_number;
+    extractor_setting_.WALL_HEIGHT_THRESHOLD   = config.wall_height_threshold;
+    extractor_setting_.WALL_FIT_THRESHOLD      = config.wall_fit_threshold;
+    extractor_setting_.CLUSTER_ANGLE_THRESHOLD = config.cluster_angle_threshold;
+    extractor_setting_.CLUSTER_DIST_THRESHOLD  = config.cluster_dist_threshold;
 
     // Parameters for Glass Detection
-    extractor_setting_.GLASS_INTENSITY          = config.glass_intensity;
-    extractor_setting_.GLASS_INTENSITY_DELTA    = config.glass_intensity_delta;
+    extractor_setting_.GLASS_INTENSITY         = config.glass_intensity;
+    extractor_setting_.GLASS_INTENSITY_DELTA   = config.glass_intensity_delta;
 
 
 
 
     // Parameters for Ground Extraction
-    extractor_setting_.DISCONTINUITY_HEIGHT     = config.discontinuity_height;
-    extractor_setting_.OBSTACLE_THRESHOLD       = config.obstacle_threshold;
+    extractor_setting_.DISCONTINUITY_HEIGHT    = config.discontinuity_height;
+    extractor_setting_.OBSTACLE_THRESHOLD      = config.obstacle_threshold;
 
     // Parameters for Curb Extraction
-    extractor_setting_.DISCONTINUITY_AZIMUTH    = config.discontinuity_azimuth;
-    extractor_setting_.CURB_HEIGHT_THRESHOLD    = config.curb_height_threshold;
-    extractor_setting_.CURB_ANGLE_THRESHOLD     = config.curb_angle_threshold;
-    extractor_setting_.SIDEWALK_MIN_LENGTH      = config.sidewalk_min_length;
-    extractor_setting_.SIDEWALK_MAX_LENGTH      = config.sidewalk_max_length;
+    extractor_setting_.DISCONTINUITY_AZIMUTH   = config.discontinuity_azimuth;
+    extractor_setting_.CURB_HEIGHT_THRESHOLD   = config.curb_height_threshold;
+    extractor_setting_.CURB_ANGLE_THRESHOLD    = config.curb_angle_threshold;
+    extractor_setting_.SIDEWALK_MIN_LENGTH     = config.sidewalk_min_length;
+    extractor_setting_.SIDEWALK_MAX_LENGTH     = config.sidewalk_max_length;
 
     // Parameters for Road Model
-    extractor_setting_.BEAM_SECTION_NUMBER      = config.beam_section_number;
-    extractor_setting_.ROAD_VIEW_RANGE          = config.road_view_range;
-    extractor_setting_.ROAD_WIDTH_THRESHOLD     = config.road_width_threshold;
-    extractor_setting_.GROUND_COUNT_THRESHOLD   = config.ground_count_threshold;
+    extractor_setting_.BEAM_SECTION_NUMBER     = config.beam_section_number;
+    extractor_setting_.ROAD_VIEW_RANGE         = config.road_view_range;
+    extractor_setting_.ROAD_WIDTH_THRESHOLD    = config.road_width_threshold;
+    extractor_setting_.GROUND_COUNT_THRESHOLD  = config.ground_count_threshold;
 
     // Parameters for Debug
-    extractor_setting_.RING_TO_ANALYZE          = config.ring_to_analyze;
+    extractor_setting_.RING_TO_ANALYZE         = config.ring_to_analyze;
 }
 
 

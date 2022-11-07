@@ -3,6 +3,9 @@
 
 typedef struct feature_extractor_setting
 {
+    // Parameters for filtering raw Point Cloud
+    double HEIGHT_THRESHOLD;
+
     // Parameters for Grid
     double GRID_LENGTH;
     int    GRID_RANGE;
@@ -22,7 +25,7 @@ typedef struct feature_extractor_setting
     double GROUND_ANGLE_THRESHOLD;
 
     // Parameters for Wall Extraction
-    double CEILING_HEIGHT_THRESHOLD;
+    double INTERPOLATION_LENGTH;
     double SECTION_NUMBER;
     double WALL_HEIGHT_THRESHOLD;
     double WALL_FIT_THRESHOLD;

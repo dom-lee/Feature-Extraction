@@ -96,7 +96,7 @@ void FeatureExtractor::run()
         debugger::debugColorTextOutput("[Wall Extractor] Execute", 5, BW);
         
         extractWall_();
-        detectGlass_();
+        //detectGlass_();
     }
 }
 
@@ -398,6 +398,7 @@ void FeatureExtractor::extractWall_()
     // Save PointCloud into Grid
     for (int i = 0; i < RING_NUMBER; ++i)
     {
+        transformed_ground_[i].clear();
         for (int j = 0; j < transformed_rings_[i].size(); ++j)
         {
             pcl::PointXYZ point(transformed_rings_[i][j].x,
@@ -406,8 +407,7 @@ void FeatureExtractor::extractWall_()
 
             // Filter outside range
             if ((point.x < 0 && point.x > -2.0 && std::abs(point.y) < 0.5) ||
-                std::abs(point.x) >= max_distance || 
-                std::abs(point.y) >= max_distance)
+                 std::sqrt(std::pow(point.x, 2) + std::pow(point.y, 2)) >= max_distance)
             {
                 continue;
             }
@@ -419,10 +419,10 @@ void FeatureExtractor::extractWall_()
                 transformed_ground_[i].push_back(point);
                 continue;
             }
-
+            
             // Filter Ground and Ceiling
             if (point.z < -estimated_lidar_height_ + setting_.GROUND_DIST_THRESHOLD ||
-                point.z > -estimated_lidar_height_ + setting_.CEILING_HEIGHT_THRESHOLD)
+                point.z > -estimated_lidar_height_ + setting_.HEIGHT_THRESHOLD)
             {
                 continue;
             }
@@ -437,17 +437,20 @@ void FeatureExtractor::extractWall_()
 
             // Save Points in each cell
             grid_cloud_[m][n].push_back(point);
+
+            //a_test_.push_back(point);
         }
     }
     debugger::debugColorTextOutput("Finished Saving PointCloud in Grid", 3, BK);
 
+    //pcl::transformPointCloud(a_test_, b_test_, transformation_.transpose());
+    //a_test_.clear();
+
     // Resize and Clear
     grid_normals_.clear();
-    grid_normals_.resize(grid_size,
-                         std::vector<Eigen::Vector3f>(grid_size, {0, 0, 0}));
+    grid_normals_.resize(grid_size, std::vector<Eigen::Vector3f>(grid_size, {0, 0, 0}));
     grid_centroid_.clear();
-    grid_centroid_.resize(grid_size,
-                          std::vector<pcl::PointXYZ>(grid_size, {0, 0, 0}));
+    grid_centroid_.resize(grid_size, std::vector<pcl::PointXYZ>(grid_size, {0, 0, 0}));
 
     // Compute RANSAC for each grid and get Normal Vector
     for (int m = 0; m < grid_size; ++m)
@@ -483,88 +486,125 @@ void FeatureExtractor::extractWall_()
     }
     debugger::debugColorTextOutput("Finished RANSAC for each Grid", 3, BK);
 
+    // Filter Grid for candidate wall seed by checking Visibility
+    std::vector<std::pair<int, int>> seed_grid_idx;
+    for (int k = 0; k < 360; ++k)
+    {
+        std::vector<std::pair<int, int>> grid_idx_on_line;
+        double end_x = max_distance * std::cos(M_PI * k / 180);
+        double end_y = max_distance * std::sin(M_PI * k / 180);
+        bresenhamLine(0, 0, end_x, end_y, grid_length, grid_idx_on_line);
+        grid_idx_on_line.pop_back();
+        
+        bool is_blocked = false;
+        for (auto& grid_idx : grid_idx_on_line)
+        {
+            int tmp_m = center_m + grid_idx.first;
+            int tmp_n = center_n + grid_idx.second;
+
+            auto& tmp_grid = grid_cloud_[tmp_m][tmp_n];
+            double height_diff = grid_max_z[tmp_m][tmp_n] - grid_min_z[tmp_m][tmp_n];
+
+            if (is_blocked || tmp_grid.size() < 3 ||
+                height_diff < setting_.WALL_HEIGHT_THRESHOLD)
+            {
+                continue;
+            } 
+            
+            is_blocked = true;
+            seed_grid_idx.push_back({tmp_m, tmp_n});
+
+            //a_test_ += tmp_grid;
+
+            break;
+        }
+    }
+    //pcl::transformPointCloud(a_test_, c_test_, transformation_.transpose());
+    //a_test_.clear();
+
     // Clustering by DFS (with checking normal)
     std::vector<std::vector<int>> grid_visited(grid_size,
                                                std::vector<int>(grid_size, 0));
     clusters_.clear();
-    for (int m = 0; m < grid_size; ++m)
+    for (auto& grid_idx : seed_grid_idx)
     {
-        for (int n = 0; n < grid_size; ++n)
+        int m = grid_idx.first;
+        int n = grid_idx.second;
+
+        // Skip Grid 
+        if (grid_normals_[m][n].isZero(0) ||
+            grid_visited[m][n] != 0)
         {
-            // Skip Grid 
-            if (grid_normals_[m][n].isZero(0) ||
-                grid_visited[m][n] != 0)
-            {
-                continue;
-            }
-
-            pcl::PointCloud<pcl::PointXYZ> transformed_cluster;
-            std::vector<std::pair<int, int>> index_of_cluster;
-            clusterGridDFS_(grid_visited, m, n, m, n,
-                            transformed_cluster, index_of_cluster);
-
-            if (index_of_cluster.size() < 2)
-            {
-                continue;
-            }
-
-            // Inverse Transform from transformed_cluster to cluster
-            clusters_.push_back({});
-            pcl::transformPointCloud(transformed_cluster, clusters_.back(),
-                                     transformation_.transpose());
-
-            // Estimate Wall Plane Coeff from Cluster
-            pcl::PointIndices inliers;
-            auto wall_coeff = estimatePlaneRANSAC(clusters_.back(),
-                                                  setting_.WALL_FIT_THRESHOLD,
-                                                  inliers);
-            // Intersection Point 
-            // A: (-d/a, 0, 0),  B: (0, -d/b, 0)
-            Eigen::Vector3f point_a(-wall_coeff(3) / wall_coeff(0), 0, 0);
-            Eigen::Vector3f point_b(0, -wall_coeff(3) / wall_coeff(1), 0);
-            Eigen::Vector3f vector_ab = (point_b - point_a);
-            vector_ab.normalize();
-
-            // Find Projected End point on Intersection of Wall Plane
-            Eigen::Vector3f end_point1;
-            Eigen::Vector3f end_point2;
-            double min_projected_distance = INFINITY;
-            double max_projected_distance = -INFINITY;
-            for (auto& idx : index_of_cluster)
-            {
-                Eigen::Vector3f centroid_from_a = -point_a +
-                    grid_centroid_[idx.first][idx.second].getVector3fMap();
-                
-                double projected_dist = centroid_from_a.dot(vector_ab);
-                if (projected_dist > max_projected_distance)
-                {
-                    max_projected_distance = projected_dist;
-                    end_point1 = point_a + projected_dist * vector_ab;
-                }
-                if (projected_dist < min_projected_distance)
-                {
-                    min_projected_distance = projected_dist;
-                    end_point2 = point_a + projected_dist * vector_ab;
-                }
-            }
-
-            // Interpolate Endpoint
-            Eigen::Vector3f end_points_vector = end_point2 - end_point1;
-            double distance = end_points_vector.norm();
-            end_points_vector.normalize();
-            int num_interpolation = distance / 0.1;
-
-            landmark_.push_back(pcl::PointXYZ(end_point1(0), end_point1(1), 0));
-            for (int i = 0; i < num_interpolation; ++i)
-            {
-                Eigen::Vector3f interpolated_point =
-                    end_point1 + (i + 1) * 0.1 * end_points_vector;
-                landmark_.push_back(pcl::PointXYZ(interpolated_point(0),
-                                                  interpolated_point(1),
-                                                  0));
-            }
-            landmark_.push_back(pcl::PointXYZ(end_point2(0), end_point2(1), 0));
+            continue;
         }
+
+        // Clustering
+        pcl::PointCloud<pcl::PointXYZ> transformed_cluster;
+        std::vector<std::pair<int, int>> index_of_cluster;
+        clusterGridDFS_(grid_visited, m, n, m, n,
+                        transformed_cluster, index_of_cluster);
+
+        if (index_of_cluster.size() < 2)
+        {
+            continue;
+        }
+
+        // Inverse Transform from transformed_cluster to cluster
+        clusters_.push_back({});
+        pcl::transformPointCloud(transformed_cluster, clusters_.back(),
+                                 transformation_.transpose());
+
+        // Estimate Wall Plane Coeff from Cluster
+        pcl::PointIndices inliers;
+        auto wall_coeff = estimatePlaneRANSAC(clusters_.back(),
+                                              setting_.WALL_FIT_THRESHOLD,
+                                              inliers);
+        // Intersection Point 
+        // A: (-d/a, 0, 0),  B: (0, -d/b, 0)
+        Eigen::Vector3f point_a(-wall_coeff(3) / wall_coeff(0), 0, 0);
+        Eigen::Vector3f point_b(0, -wall_coeff(3) / wall_coeff(1), 0);
+        Eigen::Vector3f vector_ab = (point_b - point_a);
+        vector_ab.normalize();
+
+        // Find Projected End point on Intersection of Wall Plane
+        Eigen::Vector3f end_point1;
+        Eigen::Vector3f end_point2;
+        double min_projected_distance = INFINITY;
+        double max_projected_distance = -INFINITY;
+        for (auto& idx : index_of_cluster)
+        {
+            Eigen::Vector3f centroid_from_a = -point_a +
+                grid_centroid_[idx.first][idx.second].getVector3fMap();
+            
+            double projected_dist = centroid_from_a.dot(vector_ab);
+            if (projected_dist > max_projected_distance)
+            {
+                max_projected_distance = projected_dist;
+                end_point1 = point_a + projected_dist * vector_ab;
+            }
+            if (projected_dist < min_projected_distance)
+            {
+                min_projected_distance = projected_dist;
+                end_point2 = point_a + projected_dist * vector_ab;
+            }
+        }
+
+        // Interpolate Endpoint
+        Eigen::Vector3f end_points_vector = end_point2 - end_point1;
+        double distance = end_points_vector.norm();
+        end_points_vector.normalize();
+        int num_interpolation = distance / setting_.INTERPOLATION_LENGTH;
+
+        landmark_.push_back(pcl::PointXYZ(end_point1(0), end_point1(1), 0));
+        for (int i = 0; i < num_interpolation; ++i)
+        {
+            Eigen::Vector3f interpolated_point = end_point1 +
+                (i + 1) * setting_.INTERPOLATION_LENGTH * end_points_vector;
+            landmark_.push_back(pcl::PointXYZ(interpolated_point(0),
+                                              interpolated_point(1),
+                                              0));
+        }
+        landmark_.push_back(pcl::PointXYZ(end_point2(0), end_point2(1), 0));
     }
     debugger::debugColorOutput("# of Clustering: ", clusters_.size(), 8, BK);
 }

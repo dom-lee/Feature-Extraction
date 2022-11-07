@@ -7,7 +7,7 @@
     <param name="publishing_rate" value="10" /> <!-- Hz -->
     
     <!-- ==================== Driver Mode ================================ -->
-    <param name="driver_mode" value="0" /> <!-- 0: Outdoor, 1: Indoor -->
+    <param name="driver_mode" value="1" /> <!-- 0: Outdoor, 1: Indoor -->
     
     <!-- ==================== LiDAR Settings ============================== -->
     <param name="lidar_height" value="1.4" />
